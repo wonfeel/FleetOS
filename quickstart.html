@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FleetOS - быстрый старт</title>
+<style>
+  :root{
+    --bg: #0c0f0d; --panel: #12160f; --panel-2: #171c14; --line: #2a3324;
+    --amber: #ffb300; --amber-dim: #a87400; --text: #d8dccb; --text-dim: #8a9280;
+    --green: #5fd97a; --red: #ff6b5e; --cyan: #6fd3d9; --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  }
+  *{box-sizing:border-box;}
+  body{ background:var(--bg); color:var(--text); font-family:var(--mono); font-size:14px; margin:0; padding:0 20px 60px; line-height:1.55; }
+  .wrap{ max-width:720px; margin:0 auto; }
+  h1{ color:var(--amber); font-size:24px; margin:28px 0 4px; }
+  .sub{ color:var(--text-dim); font-size:13px; margin-bottom:20px; }
+  h2{ color:var(--cyan); font-size:16px; margin:0 0 8px; }
+  section{ background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:16px 20px; margin-bottom:14px; }
+  code, pre{ font-family:var(--mono); }
+  code{ background:var(--panel-2); border:1px solid var(--line); border-radius:3px; padding:1px 5px; color:var(--green); font-size:13px; }
+  pre{ background:#000; border:1px solid var(--line); border-radius:4px; padding:10px 12px; overflow-x:auto; font-size:13px; color:#c8f0c8; }
+  pre code{ background:none; border:none; padding:0; color:inherit; }
+  a{ color:var(--amber); }
+  .tip{ background:rgba(95,217,122,0.08); border:1px solid var(--green); border-radius:4px; padding:8px 12px; margin:8px 0 0; font-size:13px; }
+  .tip b{ color:var(--green); }
+  .warn{ background:rgba(255,107,94,0.08); border:1px solid var(--red); border-radius:4px; padding:8px 12px; margin:8px 0 0; font-size:13px; }
+  .warn b{ color:var(--red); }
+  ol, ul{ padding-left:20px; margin:6px 0; }
+  li{ margin-bottom:6px; }
+  .foot{ color:var(--text-dim); font-size:12px; margin-top:8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>FleetOS - быстрый старт</h1>
+  <div class="sub">4 шага, чтобы поднять мост и первый компьютер. Подробности - <a href="fleetos_guide.html">полный гайд</a>.</div>
+
+  <section>
+    <h2>1. Запустите мост на Windows-ПК</h2>
+    <p>Двойной клик:</p>
+    <pre><code>windows\start_bridge.bat</code></pre>
+    <p>(игра на другом ПК/по Radmin VPN - вместо этого <code>windows\start_bridge_mc.bat</code>).</p>
+    <p>Откройте <code>http://127.0.0.1:8787/</code> - это дашборд.</p>
+  </section>
+
+  <section>
+    <h2>2. Установите на компьютер в игре</h2>
+    <pre><code>wget http://&lt;адрес-моста&gt;:8787/install.lua install.lua
+install http://&lt;адрес-моста&gt;:8787</code></pre>
+    <p>Адрес можно не указывать, если мост на <code>127.0.0.1:8787</code>. Всё остальное - код, <code>config.lua</code>, автозапуск - компьютер настроит сам.</p>
+    <div class="warn"><b>Разрешите адрес моста в CC:Tweaked</b>, если ещё не делали: <code>computercraft-server.toml</code> -> <code>[http.rules]</code>. Иначе будет «HTTP API is disabled».</div>
+  </section>
+
+  <section>
+    <h2>3. Готово</h2>
+    <p>Через несколько секунд узел появится в списке «Fleet» на дашборде - оттуда запуск/деплой приложений, терминал, переименование.</p>
+  </section>
+
+  <section>
+    <h2>4. Защита (по желанию)</h2>
+    <p>По умолчанию мост <b>без пароля</b> - годится только для <code>127.0.0.1</code> или доверенного VPN (Radmin). Если мост доступен кому-то ещё, включите ключ:</p>
+    <ol>
+      <li>При запуске моста: <code>set FLEET_BRIDGE_KEY=мой-ключ</code> перед <code>py windows\bridge_server.py 8787</code> (или раскомментируйте строку в <code>start_bridge_mc.bat</code>).</li>
+      <li>При установке компьютера - вторым аргументом: <code>install http://&lt;мост&gt;:8787 мой-ключ</code>.</li>
+      <li>В дашборде - поле «API key» рядом с адресом моста.</li>
+    </ol>
+    <div class="tip"><b>Без ключа без разницы, кто угодно в сети моста</b> сможет выполнять код на ваших игровых компьютерах - не выставляйте мост дальше localhost/VPN, если ключ не включён.</div>
+    <p class="foot">Подробнее про ключ, fleetctl.py, Raytower и разбор проблем - в <a href="fleetos_guide.html">полном гайде</a>.</p>
+  </section>
+</div>
+</body>
+</html>

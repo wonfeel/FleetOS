@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Триангуляция вышек - гайд</title>
+<style>
+  :root{
+    --bg: #0c0f0d;
+    --panel: #12160f;
+    --panel-2: #171c14;
+    --line: #2a3324;
+    --amber: #ffb300;
+    --amber-dim: #a87400;
+    --text: #d8dccb;
+    --text-dim: #8a9280;
+    --green: #5fd97a;
+    --red: #ff6b5e;
+    --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 15px;
+    line-height: 1.65;
+    padding: 0 0 80px;
+  }
+  a{color:var(--amber);}
+
+  .crt-header{
+    border-bottom: 1px solid var(--line);
+    padding: 28px 24px 22px;
+    background:
+      repeating-linear-gradient(0deg, rgba(255,179,0,0.025) 0px, rgba(255,179,0,0.025) 1px, transparent 1px, transparent 3px);
+  }
+  .crt-header .path{
+    color: var(--text-dim);
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    margin-bottom: 10px;
+  }
+  .crt-header h1{
+    margin: 0 0 8px;
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--amber);
+    letter-spacing: 0.01em;
+  }
+  .crt-header .sub{
+    color: var(--text-dim);
+    font-size: 13px;
+  }
+  .cursor{
+    display:inline-block; width:8px; height:15px;
+    background:var(--amber); margin-left:4px;
+    animation: blink 1s steps(1) infinite;
+    vertical-align: -2px;
+  }
+  @keyframes blink{ 50%{ opacity:0; } }
+
+  .wrap{ max-width: 760px; margin: 0 auto; padding: 0 24px; }
+
+  nav.toc{
+    display:flex; flex-wrap:wrap; gap: 6px 14px;
+    padding: 16px 0 28px;
+    border-bottom: 1px dashed var(--line);
+    margin-bottom: 28px;
+    font-size: 13px;
+  }
+  nav.toc a{
+    color: var(--text-dim);
+    text-decoration:none;
+    border-bottom: 1px solid transparent;
+  }
+  nav.toc a:hover{ color: var(--amber); border-color: var(--amber-dim); }
+  nav.toc .n{ color: var(--amber-dim); margin-right:4px; }
+
+  section{ margin-bottom: 44px; }
+  h2{
+    font-size: 16px;
+    color: var(--amber);
+    margin: 0 0 14px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--line);
+    display:flex; align-items:baseline; gap:10px;
+  }
+  h2 .tag{
+    font-size:11px; color:var(--bg); background:var(--amber);
+    padding: 2px 6px; border-radius: 3px; font-weight:700;
+  }
+  h3{ font-size:14px; color:var(--text); margin: 22px 0 8px; }
+  p{ margin: 10px 0; color: var(--text); }
+  .dim{ color: var(--text-dim); }
+
+  table{ width:100%; border-collapse: collapse; font-size: 13px; margin: 12px 0; }
+  th,td{ text-align:left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th{ color: var(--text-dim); font-weight:400; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+  td code{ color: var(--amber); }
+
+  code{
+    font-family: var(--mono);
+    background: var(--panel-2);
+    padding: 1px 5px;
+    border-radius: 3px;
+    color: var(--amber);
+    font-size: 0.92em;
+  }
+
+  .codeblock{
+    position:relative;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    margin: 10px 0 16px;
+    overflow:hidden;
+  }
+  .codeblock .bar{
+    display:flex; align-items:center; justify-content:space-between;
+    padding: 7px 12px;
+    background: var(--panel-2);
+    border-bottom: 1px solid var(--line);
+    font-size: 11px;
+    color: var(--text-dim);
+    letter-spacing: 0.03em;
+  }
+  .codeblock pre{
+    margin:0; padding: 14px 16px;
+    overflow-x:auto;
+    font-size: 13px;
+    line-height:1.55;
+    color: var(--text);
+  }
+  .copy-btn{
+    background: transparent;
+    border: 1px solid var(--line);
+    color: var(--text-dim);
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 3px 9px;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  .copy-btn:hover{ color: var(--amber); border-color: var(--amber-dim); }
+  .copy-btn.copied{ color: var(--green); border-color: var(--green); }
+
+  .steps{ counter-reset: step; list-style:none; padding:0; margin: 12px 0; }
+  .steps li{
+    counter-increment: step;
+    position: relative;
+    padding: 4px 0 4px 34px;
+    margin-bottom: 6px;
+  }
+  .steps li::before{
+    content: counter(step);
+    position:absolute; left:0; top:4px;
+    width:22px; height:22px;
+    border:1px solid var(--amber-dim);
+    color: var(--amber);
+    border-radius: 4px;
+    font-size: 12px;
+    display:flex; align-items:center; justify-content:center;
+  }
+
+  .tabs{ display:flex; gap:4px; margin-bottom: -1px; }
+  .tab-btn{
+    font-family: var(--mono);
+    background: var(--panel);
+    color: var(--text-dim);
+    border: 1px solid var(--line);
+    border-bottom: none;
+    padding: 8px 16px;
+    font-size: 13px;
+    cursor:pointer;
+    border-radius: 6px 6px 0 0;
+  }
+  .tab-btn.active{ color: var(--amber); background: var(--panel-2); }
+  .tab-panel{
+    display:none;
+    border: 1px solid var(--line);
+    border-radius: 0 6px 6px 6px;
+    padding: 18px;
+    background: var(--panel-2);
+  }
+  .tab-panel.active{ display:block; }
+
+  .callout{
+    border-left: 3px solid var(--amber-dim);
+    background: var(--panel);
+    padding: 10px 14px;
+    font-size: 13px;
+    color: var(--text-dim);
+    margin: 14px 0;
+    border-radius: 0 4px 4px 0;
+  }
+  .callout.warn{ border-left-color: var(--red); }
+  .callout strong{ color: var(--text); }
+
+  details{
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    margin-bottom: 8px;
+    background: var(--panel);
+  }
+  summary{
+    padding: 10px 14px;
+    cursor:pointer;
+    font-size: 13px;
+    color: var(--text);
+    list-style: none;
+    display:flex; align-items:center; gap:8px;
+  }
+  summary::-webkit-details-marker{ display:none; }
+  summary::before{ content:"▸"; color: var(--amber-dim); }
+  details[open] summary::before{ content:"▾"; }
+  details .body{ padding: 0 14px 14px; font-size: 13px; color: var(--text-dim); }
+  details .body code{ display:block; margin-top:6px; }
+
+  footer{
+    text-align:center; color: var(--text-dim); font-size: 12px;
+    padding-top: 30px; border-top: 1px dashed var(--line); margin-top: 10px;
+  }
+</style>
+</head>
+<body>
+
+<div class="crt-header">
+  <div class="wrap" style="padding:0;">
+    <div class="path">craftos&gt; edit README<span class="cursor"></span></div>
+    <h1>Триангуляция вышек - гайд по запуску</h1>
+    <div class="sub">raytower.lua - один файл, ComputerCraft / CC:Tweaked</div>
+  </div>
+</div>
+
+<div class="wrap">
+
+<nav class="toc">
+  <a href="#files"><span class="n">01</span>Файл</a>
+  <a href="#setup"><span class="n">02</span>Запуск</a>
+  <a href="#commands"><span class="n">03</span>Команды</a>
+  <a href="#calibrate"><span class="n">04</span>Калибровка</a>
+  <a href="#monitor"><span class="n">05</span>Монитор</a>
+  <a href="#accuracy"><span class="n">06</span>Точность</a>
+  <a href="#debug"><span class="n">07</span>Проблемы</a>
+</nav>
+
+<section id="files">
+  <h2><span class="tag">01</span>Файл</h2>
+  <p>Один файл - <code>raytower.lua</code>. Роль выбирается аргументом при запуске, поэтому на master и на все вышки заливается одно и то же.</p>
+  <div class="callout"><strong>Структура проекта:</strong> всё, что реально копируется в Minecraft, лежит в <code>game/</code> (в т.ч. <code>raytower.lua</code>, <code>fleetos.lua</code>, <code>apps/</code>). Папки <code>windows/</code> и <code>test/</code> - только локальные инструменты для проверки на ПК без игры, их в игру заливать не нужно.</div>
+</section>
+
+<section id="setup">
+  <h2><span class="tag">02</span>Запуск</h2>
+
+  <div class="tabs">
+    <button class="tab-btn active" onclick="showTab('master')">Master</button>
+    <button class="tab-btn" onclick="showTab('slave')">Slave (вышка)</button>
+  </div>
+
+  <div class="tab-panel active" id="tab-master">
+    <p class="dim">Прикрепи wireless/ender modem (и опционально monitor - сам покажет таблицу с позицией), запусти:</p>
+    <div class="codeblock">
+      <div class="bar"><span>craftos</span><button class="copy-btn" onclick="copyCode(this,'m1')">копировать</button></div>
+      <pre id="m1">raytower master listen</pre>
+    </div>
+    <div class="callout">Автозапуск после перезагрузки настраивается сам - создаётся <code>startup.lua</code>.</div>
+    <p class="dim">По умолчанию <code>forward = (1,0,0)</code>, знаки кватерниона не меняются. Если после калибровки (см. раздел 04) нашлась другая комбинация - передай её аргументами:</p>
+    <div class="codeblock">
+      <div class="bar"><span>craftos</span><button class="copy-btn" onclick="copyCode(this,'m1b')">копировать</button></div>
+      <pre id="m1b">raytower master listen fx fy fz sx sy sz</pre>
+    </div>
+    <p class="dim">Например: <code>raytower master listen 1 0 0 -1 1 1</code> - forward=(1,0,0), знак X-компоненты кватерниона инвертирован.</p>
+  </div>
+
+  <div class="tab-panel" id="tab-slave">
+    <p class="dim">Компьютер должен физически стоять на Sub-Level (мод CC: Sable / Create: Aeronautics). Прикрепи modem, запусти:</p>
+    <div class="codeblock">
+      <div class="bar"><span>craftos</span><button class="copy-btn" onclick="copyCode(this,'s1')">копировать</button></div>
+      <pre id="s1">raytower slave</pre>
+    </div>
+    <div class="callout">Правок не нужно - id, позиция и направление берутся автоматически.</div>
+  </div>
+</section>
+
+<section id="commands">
+  <h2><span class="tag">03</span>Команды</h2>
+  <table>
+    <tr><th>Команда</th><th>Что делает</th></tr>
+    <tr><td><code>raytower slave</code></td><td>запуск на вышке</td></tr>
+    <tr><td><code>raytower master listen [fx fy fz sx sy sz] [debug]</code></td><td>опрос вышек и расчёт позиции; можно передать forward-вектор, знаки кватерниона и включить debug-вывод</td></tr>
+    <tr><td><code>raytower master calibrate tx ty tz</code></td><td>перебирает все комбинации оси/знаков и находит ту, что даёт минимальную угловую ошибку до цели tx,ty,tz</td></tr>
+    <tr><td><code>raytower master add id x y z qx qy qz qw</code></td><td>добавить луч, позиция печатается сразу</td></tr>
+    <tr><td><code>raytower master remove id</code></td><td>удалить луч, позиция печатается сразу</td></tr>
+    <tr><td><code>raytower master list</code></td><td>показать текущие лучи</td></tr>
+    <tr><td><code>raytower master solve</code></td><td>посчитать позицию</td></tr>
+    <tr><td><code>raytower master clear</code></td><td>удалить все лучи</td></tr>
+  </table>
+</section>
+
+<section id="calibrate">
+  <h2><span class="tag">04</span>Калибровка луча</h2>
+  <p>Если луч "уходит вбок" - это не баг, а неверная комбинация forward-оси / знаков кватерниона для твоей вышки. Подобрать вручную сложно, поэтому есть автоматический перебор:</p>
+  <ol class="steps">
+    <li>Запусти <code>raytower master listen debug</code> на минуту, чтобы <code>rays.dat</code> заполнился реальными <code>origin</code>/<code>quat</code> от вышек (в debug-режиме они печатаются в консоль).</li>
+    <li>Встань ровно в точку, куда физически наведены вышки, и посмотри свои координаты (F3).</li>
+    <li>Останови <code>listen</code> (Ctrl+T) и выполни:
+      <div class="codeblock">
+        <div class="bar"><span>craftos</span><button class="copy-btn" onclick="copyCode(this,'cal1')">копировать</button></div>
+        <pre id="cal1">raytower master calibrate 1859.65 17.98 1591.59</pre>
+      </div>
+    </li>
+    <li>Скрипт выведет топ-5 комбинаций <code>forward</code>/<code>qsign</code>, отсортированных по угловой ошибке (меньше - лучше). Возьми первую строку.</li>
+    <li>Запускай <code>listen</code> с этими значениями:
+      <div class="codeblock">
+        <div class="bar"><span>craftos</span><button class="copy-btn" onclick="copyCode(this,'cal2')">копировать</button></div>
+        <pre id="cal2">raytower master listen 1 0 0 -1 1 1</pre>
+      </div>
+    </li>
+  </ol>
+  <div class="callout">Чем больше вышек участвовало в снимке для калибровки - тем надёжнее результат (каждая добавляет свою невязку в среднюю ошибку).</div>
+</section>
+
+<section id="monitor">
+  <h2><span class="tag">05</span>Монитор</h2>
+  <p>Если к master-компьютеру подключён <code>monitor</code> (обычный или advanced) - он находится автоматически, ничего настраивать не нужно. На нём выводится таблица: список активных вышек с их координатами и крупно X/Y/Z найденной позиции. Обновляется каждый опрос.</p>
+</section>
+
+<section id="accuracy">
+  <h2><span class="tag">06</span>Точность</h2>
+  <p>Позиция считается методом наименьших квадратов - точка, сумма квадратов расстояний от которой до всех лучей минимальна (не среднее арифметическое пересечений). Реальная точность зависит не от математики (двойная точность Lua даёт околонулевую погрешность вычислений), а от:</p>
+  <ul>
+    <li><b>Числа вышек</b> - больше вышек, участвующих в расчёте одновременно, снижают влияние шума каждой отдельной;</li>
+    <li><b>Разброса углов</b> - лучи под сильно разными углами друг к другу дают устойчивое решение; почти параллельные лучи (вышки рядом и смотрят в одну сторону) - источник большой погрешности, вплоть до <code>"rays are parallel or degenerate"</code>;</li>
+    <li><b>Точности origin/quat от самой игры</b> - если Sable отдаёт координаты/ориентацию с шумом или округлением, это прямо передаётся в результат.</li>
+  </ul>
+  <div class="callout">С 2 вышками решение существует, но крайне чувствительно к шуму. Рекомендуется 3+ вышки под разными углами.</div>
+</section>
+
+<section id="debug">
+  <h2><span class="tag">07</span>Проблемы</h2>
+
+  <details>
+    <summary>«Не найден modem»</summary>
+    <div class="body">Модем не прикреплён к компьютеру. Проверь ПКМ по компьютеру с модемом в руке.</div>
+  </details>
+
+  <details>
+    <summary>Master не видит вышки</summary>
+    <div class="body">Проверь дистанцию (wireless modem ограничен радиусом, ender - без ограничения) и что <code>raytower slave</code> реально запущен.</div>
+  </details>
+
+  <details>
+    <summary>«Компьютер не на Sub-Level (CC: Sable)»</summary>
+    <div class="body">Компьютер физически не на Sub-Level, либо мод CC: Sable не установлен.</div>
+  </details>
+
+  <details>
+    <summary>Луч уходит вбок / мимо цели</summary>
+    <div class="body">Нужна калибровка - см. раздел 04. Простой перебор осей руками почти никогда не помогает, если дело в знаке кватерниона (handedness), а не в самой оси.</div>
+  </details>
+</section>
+
+</div>
+
+<footer>rays.dat | raytower.lua | startup.lua</footer>
+
+<script>
+function copyCode(btn, id){
+  const text = document.getElementById(id).innerText;
+  navigator.clipboard.writeText(text).then(() => {
+    const original = btn.textContent;
+    btn.textContent = "скопировано";
+    btn.classList.add("copied");
+    setTimeout(() => { btn.textContent = original; btn.classList.remove("copied"); }, 1400);
+  });
+}
+function showTab(name){
+  document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+  document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
+  event.currentTarget.classList.add("active");
+  document.getElementById("tab-" + name).classList.add("active");
+}
+</script>
+
+</body>
+</html>

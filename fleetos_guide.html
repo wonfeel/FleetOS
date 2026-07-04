@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FleetOS - руководство</title>
+<style>
+  :root{
+    --bg: #0c0f0d; --panel: #12160f; --panel-2: #171c14; --line: #2a3324;
+    --amber: #ffb300; --amber-dim: #a87400; --text: #d8dccb; --text-dim: #8a9280;
+    --green: #5fd97a; --red: #ff6b5e; --cyan: #6fd3d9; --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  }
+  *{box-sizing:border-box;}
+  body{ background:var(--bg); color:var(--text); font-family:var(--mono); font-size:14px; margin:0; padding:0 20px 60px; line-height:1.55; }
+  .wrap{ max-width:920px; margin:0 auto; }
+  h1{ color:var(--amber); font-size:26px; margin:28px 0 4px; }
+  .sub{ color:var(--text-dim); font-size:13px; margin-bottom:20px; }
+  h2{ color:var(--amber); font-size:18px; margin:0 0 12px; border-bottom:1px solid var(--line); padding-bottom:8px; }
+  h3{ color:var(--cyan); font-size:14px; margin:18px 0 8px; }
+  section{ background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:18px 22px; margin-bottom:16px; }
+  code, pre{ font-family:var(--mono); }
+  code{ background:var(--panel-2); border:1px solid var(--line); border-radius:3px; padding:1px 5px; color:var(--green); font-size:13px; }
+  pre{ background:#000; border:1px solid var(--line); border-radius:4px; padding:10px 12px; overflow-x:auto; font-size:13px; color:#c8f0c8; }
+  pre code{ background:none; border:none; padding:0; color:inherit; }
+  a{ color:var(--amber); }
+  .warn{ background:rgba(255,107,94,0.08); border:1px solid var(--red); border-radius:4px; padding:10px 14px; margin:10px 0; color:var(--text); }
+  .warn b{ color:var(--red); }
+  .tip{ background:rgba(95,217,122,0.08); border:1px solid var(--green); border-radius:4px; padding:10px 14px; margin:10px 0; }
+  .tip b{ color:var(--green); }
+  table{ width:100%; border-collapse:collapse; font-size:13px; margin:10px 0; }
+  th,td{ text-align:left; padding:6px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th{ color:var(--text-dim); font-weight:400; text-transform:uppercase; font-size:11px; }
+  ul, ol{ padding-left:22px; }
+  li{ margin-bottom:4px; }
+  nav{ display:flex; flex-wrap:wrap; gap:6px 14px; margin-bottom:22px; }
+  nav a{ color:var(--text-dim); text-decoration:none; font-size:13px; border:1px solid var(--line); border-radius:4px; padding:4px 10px; }
+  nav a:hover{ color:var(--amber); border-color:var(--amber-dim); }
+  .pill{ display:inline-block; padding:1px 7px; border-radius:3px; font-size:11px; background:rgba(255,179,0,0.15); color:var(--amber); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>FleetOS - руководство</h1>
+  <div class="sub">Мини-ОС для компьютеров CC:Tweaked (Minecraft) + мост/дашборд для управления с Windows-ПК.</div>
+
+  <nav>
+    <a href="#overview">Обзор</a>
+    <a href="#bridge">1. Мост (bridge_server.py)</a>
+    <a href="#install">2. Установка на компьютер</a>
+    <a href="#dashboard">3. Дашборд</a>
+    <a href="#auth">4. Защита (API-ключ)</a>
+    <a href="#fleetctl">5. fleetctl.py</a>
+    <a href="#raytower">6. Raytower</a>
+    <a href="#troubleshooting">7. Проблемы</a>
+  </nav>
+
+  <section id="overview">
+    <h2>Обзор</h2>
+    <p>FleetOS превращает набор компьютеров CC:Tweaked в управляемый «флот»: у каждого свой мини-ядро (<code>fleetos.lua</code>), которое запускает приложения (<code>apps/</code>) и умеет опрашивать ваш Windows-ПК на предмет команд.</p>
+    <p><b style="color:var(--amber)">Все компьютеры равноправны - master/slave нет.</b> Каждый узел напрямую общается с мостом по HTTP через свой уникальный <code>id</code> (из <code>config.lua</code>). Мост (<code>bridge_server.py</code>) просто хранит очередь команд на каждый узел и последний полученный от него статус.</p>
+    <table>
+      <tr><th>Часть</th><th>Что это</th></tr>
+      <tr><td><code>game/fleetos.lua</code></td><td>Ядро: кооперативная многозадачность, менеджер приложений, зеркалирование терминала на монитор с сенсорными кнопками (запуск/свернуть/восстановить/закрыть у каждого приложения).</td></tr>
+      <tr><td><code>game/install.lua</code></td><td>Загрузчик для нового компьютера - единственный файл, который качается вручную.</td></tr>
+      <tr><td><code>game/apps/common/fleetbridge.lua</code></td><td>Агент связи с мостом - ставится на каждый узел, который должен быть управляем удалённо.</td></tr>
+      <tr><td><code>windows/bridge_server.py</code></td><td>HTTP-сервер на Windows - без сторонних библиотек, только Python.</td></tr>
+      <tr><td><code>windows/dashboard.html</code></td><td>Веб-панель управления - то, что вы открываете в браузере.</td></tr>
+    </table>
+    <div class="tip"><b>Есть отдельный гайд</b> именно по триангуляции вышек (Raytower) - файл <code>guide.html</code> рядом с этим. Здесь - про флот целиком, там - только про <code>raytower.lua</code>.</div>
+  </section>
+
+  <section id="bridge">
+    <h2>1. Запуск моста</h2>
+    <p>Нужен установленный Python. Запускайте одним из двух вариантов:</p>
+    <h3>Только локально (тест/один ПК с игрой)</h3>
+    <pre><code>windows\start_bridge.bat</code></pre>
+    <p>Слушает <code>127.0.0.1:8787</code>. Подходит, если Minecraft и мост работают на одной машине.</p>
+
+    <h3>Через Radmin VPN (игра на другом ПК/с друзьями)</h3>
+    <pre><code>windows\start_bridge_mc.bat</code></pre>
+    <p>Слушает на вашем Radmin-адресе, чтобы реальный компьютер в игре мог достучаться через VPN. В <code>game/config.lua</code> каждого узла поле <code>bridgeUrl</code> должно указывать на этот же адрес.</p>
+
+    <div class="warn"><b>Важно:</b> CC:Tweaked по умолчанию блокирует http-запросы к локальным/LAN-адресам. Нужно разрешить адрес вашего моста в <code>computercraft-server.toml</code>, секция <code>[http.rules]</code> - иначе <code>fleetbridge.lua</code> будет писать «HTTP API is disabled» или получать отказ.</div>
+
+    <p>После запуска откройте <code>http://127.0.0.1:8787/</code> в браузере - это и есть дашборд.</p>
+  </section>
+
+  <section id="install">
+    <h2>2. Установка на новый компьютер (в игре)</h2>
+    <p>На свежем компьютере CC:Tweaked, у которого ещё ничего нет:</p>
+    <pre><code>wget http://&lt;адрес-моста&gt;:8787/install.lua install.lua
+install http://&lt;адрес-моста&gt;:8787</code></pre>
+    <p>Адрес моста можно не указывать - тогда по умолчанию берётся <code>http://127.0.0.1:8787</code>. <code>install</code> сам:</p>
+    <ul>
+      <li>скачивает <code>fleetos.lua</code> и базовые приложения (<code>shell</code>, <code>fleetbridge</code>);</li>
+      <li>создаёт стартовый <code>config.lua</code> с уникальным <code>id</code> (если его ещё нет - повторный запуск ничего не затирает);</li>
+      <li>прописывает <code>startup.lua</code>, чтобы после перезагрузки FleetOS запускался сам;</li>
+      <li>сразу запускает ядро.</li>
+    </ul>
+    <p>Если на мосту включена защита ключом (раздел 4 ниже), передайте его вторым аргументом:</p>
+    <pre><code>install http://&lt;адрес-моста&gt;:8787 &lt;api-key&gt;</code></pre>
+    <p>После установки <code>id</code>/<code>role</code>/список автозапуска можно менять прямо через панель «Remote files» дашборда (путь <code>config.lua</code>) или переименовать узел одной кнопкой (раздел 3).</p>
+  </section>
+
+  <section id="dashboard">
+    <h2>3. Дашборд</h2>
+    <p>Всё управление - с одной страницы <code>http://&lt;адрес-моста&gt;:8787/</code>.</p>
+
+    <h3>Fleet - выбор компьютера</h3>
+    <p>Список появляется сам, как только узел хотя бы раз опросил мост. Выбранный узел - тот, с которым работают панели «Terminal» и «Remote files» ниже.</p>
+    <ul>
+      <li><b>Update fleetos</b> - перекачивает свежий <code>fleetos.lua</code> и перезагружает узел (ядро не «приложение», обычный деплой его не трогает).</li>
+      <li><b>Rename</b> - меняет <code>id</code> узла (пишется в отдельный файл <code>node_id.txt</code>, не трогая ваш <code>config.lua</code>) и перезагружает его.</li>
+    </ul>
+
+    <h3>Terminal</h3>
+    <p>Показывает live-вывод выбранного компьютера (то, что он печатает), и позволяет ввести команду - как будто вы печатаете прямо в его консоли. Команды ядра: <code>list</code>/<code>status</code>, <code>run &lt;app&gt;</code>, <code>kill &lt;app&gt;</code>, <code>minimize &lt;app&gt;</code>, <code>restore &lt;app&gt;</code>, <code>apps</code> - плюс любая настоящая CraftOS-программа.</p>
+
+    <h3>Remote files</h3>
+    <p>Чтение/запись произвольного файла на выбранном компьютере по пути (например <code>config.lua</code>).</p>
+
+    <h3>Local apps</h3>
+    <p>Редактирование кода приложений <b>на вашем ПК</b> (не в игре) - кнопка <b>Edit</b>. <b>Run/Kill</b> - запустить/остановить на целевом узле. <b>Deploy</b> - сохранить + записать код на компьютер (с бэкапом <code>.bak</code>) и перезапустить, если уже было запущено. Цель по умолчанию - выбранный узел, либо <code>*</code> - все известные узлы.</p>
+
+    <h3>Create a new app</h3>
+    <p>Пишете код прямо в браузере - создаётся новый файл в <code>game/apps/</code> на вашем ПК (группа <code>common</code>/<code>raytower</code>/«other» - просто для порядка в списке). Дальше - обычный Deploy.</p>
+
+    <h3>Macros</h3>
+    <p>Один клик = несколько команд подряд (например «Redeploy fleetbridge»).</p>
+
+    <h3>Монитор в игре</h3>
+    <p>Если к компьютеру подключён продвинутый монитор (Advanced Monitor) - на нём само появляется панель задач с кнопками в стиле окон Windows:</p>
+    <table>
+      <tr><th>Состояние</th><th>Кнопки</th><th>Что означает</th></tr>
+      <tr><td>остановлено</td><td><code>[&gt;]</code></td><td>запустить</td></tr>
+      <tr><td>запущено</td><td><code>[_]</code> <code>[X]</code></td><td>свернуть / закрыть</td></tr>
+      <tr><td>свёрнуто</td><td><code>[^]</code> <code>[X]</code></td><td>восстановить / закрыть</td></tr>
+    </table>
+    <p>«Свернуть» - это просто визуальный режим (как в Windows): приложение как работало, так и работает, скрывается только надпись. Тап по заголовку сворачивает/разворачивает весь список - вместо него показывается лента лога на весь монитор.</p>
+  </section>
+
+  <section id="auth">
+    <h2>4. Защита по API-ключу</h2>
+    <p>По умолчанию <b>защиты нет вообще</b> - мост рассчитан на <code>127.0.0.1</code> или доверенный VPN (Radmin). Если хотите обезопасить доступ (например, играете через Radmin с другими людьми), включите ключ:</p>
+    <ol>
+      <li>Задайте переменную окружения перед запуском моста:
+        <pre><code>set FLEET_BRIDGE_KEY=мой-секретный-ключ
+py windows\bridge_server.py 8787</code></pre>
+        (в <code>start_bridge_mc.bat</code> есть готовая закомментированная строка - раскомментируйте и впишите свой ключ).
+      </li>
+      <li>Впишите тот же ключ в <code>config.lua</code> каждого узла:
+        <pre><code>apiKey = "мой-секретный-ключ",</code></pre>
+      </li>
+      <li>В дашборде - поле «API key» рядом с адресом моста (раздел «Bridge address»), сохраняется в браузере.</li>
+      <li>При установке нового компьютера - вторым аргументом команды <code>install</code> (раздел 2).</li>
+      <li>Для <code>fleetctl.py</code> - та же переменная окружения <code>FLEET_BRIDGE_KEY</code>.</li>
+    </ol>
+    <div class="tip"><b>Без ключа всё продолжает работать как раньше</b> - это опция, а не обязательное требование.</div>
+    <div class="warn"><b>Без ключа не выставляйте мост дальше localhost/VPN.</b> Кто угодно, кто достучится до адреса моста, сможет выполнять код и читать/писать файлы на любом вашем игровом компьютере.</div>
+  </section>
+
+  <section id="fleetctl">
+    <h2>5. fleetctl.py - консольная альтернатива</h2>
+    <p>Тот же API, что у дашборда, но из командной строки:</p>
+    <pre><code>python windows\fleetctl.py ping
+python windows\fleetctl.py status
+python windows\fleetctl.py run &lt;узел|*&gt; &lt;приложение&gt;
+python windows\fleetctl.py kill &lt;узел|*&gt; &lt;приложение&gt;
+python windows\fleetctl.py deploy &lt;узел|*&gt; &lt;приложение&gt; &lt;url-с-кодом&gt;
+python windows\fleetctl.py rollback &lt;узел|*&gt; &lt;приложение&gt;</code></pre>
+    <p>Адрес моста и ключ - через переменные окружения <code>FLEET_BRIDGE_URL</code> / <code>FLEET_BRIDGE_KEY</code>, если не стандартные.</p>
+  </section>
+
+  <section id="raytower">
+    <h2>6. Raytower (триангуляция) - отдельная фича</h2>
+    <p>Не связана с управлением флотом - это независимый инструмент через <code>rednet</code> (нужен модем) для определения позиции по направлению лучей от нескольких «вышек». Подробный отдельный гайд - <code>guide.html</code> рядом с этим файлом. Коротко:</p>
+    <ul>
+      <li><code>raytower_master</code> (приложение под FleetOS) - на одном компьютере, считает позицию и умеет рисовать её на своём мониторе.</li>
+      <li><code>raytower_slave</code> (приложение под FleetOS) - на каждой вышке, отчитывается мастеру.</li>
+      <li><code>game/raytower.lua</code> - тот же функционал одним файлом, без FleetOS, с командой калибровки (<code>master calibrate</code>) для подбора <code>raytowerForward</code>/<code>raytowerQSign</code>.</li>
+    </ul>
+  </section>
+
+  <section id="troubleshooting">
+    <h2>7. Частые проблемы</h2>
+    <table>
+      <tr><th>Симптом</th><th>Причина / решение</th></tr>
+      <tr><td>«HTTP API is disabled»</td><td>На этом компьютере вообще не включён <code>http</code> в настройках сервера/CC:Tweaked.</td></tr>
+      <tr><td>Узел не появляется в дашборде</td><td>Проверьте <code>computercraft-server.toml</code> -> <code>[http.rules]</code> - адрес моста должен быть разрешён. Также сверьте <code>bridgeUrl</code> в <code>config.lua</code> с реальным адресом/портом моста.</td></tr>
+      <tr><td>401 / «unauthorized»</td><td>На мосту включён <code>FLEET_BRIDGE_KEY</code>, а у узла/дашборда либо не задан, либо не совпадает ключ.</td></tr>
+      <tr><td>После «Update fleetos» узел долго не появляется</td><td>Обычно перезагрузка занимает всего несколько секунд. Если долго - убедитесь, что мир/сервер сейчас реально загружен и тикает (если сервер выключен, компьютер просто ничего не может сделать, пока вы не зайдёте обратно).</td></tr>
+      <tr><td>Деплой <code>raytower_master</code> падает «File not found»</td><td>Ему нужен отдельный файл <code>triangulation.lua</code>, не входящий в обычные приложения - дашборд сам подкладывает его при деплое, ничего делать вручную не нужно.</td></tr>
+    </table>
+  </section>
+</div>
+</body>
+</html>

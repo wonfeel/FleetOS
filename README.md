@@ -1,35 +1,35 @@
-# FleetOS Remote Terminal (dashboard)
+# FleetOS
 
-Static frontend for controlling a [FleetOS](https://github.com/wonfeel) Minecraft
-CC:Tweaked fleet from a browser. This is just the UI - it always talks to
-`bridge_server.py` running on your own PC, which in turn polls the in-game
-master computer over HTTP.
+A mini-OS for CC:Tweaked (Minecraft) computers, plus a Windows-side bridge/dashboard to
+control them remotely. **Every computer is equal, there is no master/slave.** Each one
+runs its own agent and talks to the bridge directly.
 
-## Using this hosted copy
+See [`PROJECT_NOTES.md`](PROJECT_NOTES.md) for the full architecture reference, [`quickstart.html`](quickstart.html)
+for a 4-step setup guide, and [`fleetos_guide.html`](fleetos_guide.html) for the in-depth guide
+(Russian). [`guide.html`](guide.html) is a separate guide for the unrelated Raytower/triangulation
+feature.
 
-1. Start `bridge_server.py` on your PC (it listens on `127.0.0.1:8787` by default).
-2. Open this page in a browser **on that same PC**.
-3. If the address shown in "Bridge address" isn't `http://127.0.0.1:8787`, fix it there and
-   click "Save & reload".
+## Folder structure
 
-That's it - no build step, no server-side code here, just static HTML/JS.
+- `game/` - everything that runs *inside Minecraft* (kernel `fleetos.lua`, bootstrap `install.lua`,
+  per-node `config.lua`, apps under `apps/`).
+- `windows/` - PC-side tooling: `bridge_server.py` (stdlib-only HTTP server), `dashboard.html`
+  (the web UI, also published here as `index.html` for GitHub Pages), `fleetctl.py` (CLI
+  alternative), `craftos_shim.lua`/`run_fleetos.lua` (run FleetOS as a persistent Windows
+  process without Minecraft, for testing).
+- `test/` - unit tests (`cc_mocks.lua` + test scripts), run from `game/`: `lua ../test/<name>.lua`.
 
-## Why "same PC" matters
+## Dashboard-only hosted copy
 
-This page is served over HTTPS (GitHub Pages), but the bridge only speaks plain HTTP.
-Browsers make an exception for `127.0.0.1`/`localhost` (so step 2 above works), but they
-block plain-HTTP requests to any other address from an HTTPS page. So opening this page on
-a *different* machine than the one running `bridge_server.py` (e.g. pointing "Bridge address"
-at a Radmin VPN IP) will be blocked by the browser unless you manually allow insecure content
-for this site.
+`index.html` (repo root) is a static copy of `windows/dashboard.html`, published via GitHub
+Pages purely for convenience, open it in a browser **on the same PC** running `bridge_server.py`
+(it talks to `http://127.0.0.1:8787` by default; browsers block plain-HTTP requests to any other
+address from an HTTPS page, so a Radmin/remote bridge address won't work from the hosted page
+unless you allow insecure content for this site).
 
-## No authentication
+## No authentication by default
 
-`bridge_server.py` has no login of its own - anyone who can reach it can run code and
-read/write files on your in-game computer through it. Keep it bound to `127.0.0.1` (the
-default) unless you know what you're doing.
-
-## Source
-
-The full FleetOS project (kernel, in-game apps, bridge server, this dashboard) lives in a
-separate local project - this repo only publishes the static dashboard file.
+`bridge_server.py` has no login by default. Anyone who can reach it can run code and
+read/write files on your in-game computers. Keep it bound to `127.0.0.1`/a trusted VPN, or
+set `FLEET_BRIDGE_KEY` (see `fleetos_guide.html`, section 4) if it needs to be reachable by
+others.

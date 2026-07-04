@@ -1,0 +1,18 @@
+# Editor/tooling scratch, not part of the project
+.claude/
+.site-build/
+.site-update/
+tempCodeRunnerFile.lua
+
+# Local multi-node simulation (windows/run_sim_node.lua spins these up on
+# demand from game/ - throwaway copies + generated state, not source)
+windows/sim/
+
+# Generated at runtime by fleetbridge.lua's deploy/rename commands - never
+# hand-authored, and specific to whichever computer produced them
+*.bak
+node_id.txt
+
+# Python bytecode cache
+__pycache__/
+*.pyc
