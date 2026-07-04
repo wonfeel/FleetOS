@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FleetOS Remote Terminal</title>
+<style>
+  :root{
+    --bg: #0c0f0d; --panel: #12160f; --panel-2: #171c14; --line: #2a3324;
+    --amber: #ffb300; --amber-dim: #a87400; --text: #d8dccb; --text-dim: #8a9280;
+    --green: #5fd97a; --red: #ff6b5e; --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  }
+  *{box-sizing:border-box;}
+  body{ background:var(--bg); color:var(--text); font-family:var(--mono); font-size:14px; margin:0; padding:20px; }
+  h1{ color:var(--amber); font-size:20px; margin:0 0 4px; }
+  .sub{ color:var(--text-dim); font-size:12px; margin-bottom:20px; }
+  .wrap{ max-width:960px; margin:0 auto; }
+  section{ background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:16px; margin-bottom:16px; }
+  h2{ color:var(--amber); font-size:14px; margin:0 0 12px; border-bottom:1px solid var(--line); padding-bottom:8px; }
+  table{ width:100%; border-collapse:collapse; font-size:13px; }
+  th,td{ text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); }
+  th{ color:var(--text-dim); font-weight:400; text-transform:uppercase; font-size:11px; }
+  input, select, button, textarea{
+    font-family:var(--mono); background:var(--panel-2); color:var(--text);
+    border:1px solid var(--line); border-radius:4px; padding:5px 8px; font-size:13px;
+  }
+  input{ width:90px; }
+  button{ background:var(--amber-dim); color:var(--bg); border:none; cursor:pointer; font-weight:700; }
+  button:hover{ background:var(--amber); }
+  button.secondary{ background:var(--panel-2); color:var(--text); border:1px solid var(--line); }
+  button.secondary:hover{ color:var(--amber); border-color:var(--amber-dim); background:var(--panel-2); }
+  .row{ display:flex; gap:8px; align-items:center; margin-bottom:8px; flex-wrap:wrap; }
+  .row label{ color:var(--text-dim); font-size:12px; }
+  .status-running{ color:var(--green); }
+  .status-suspended{ color:var(--amber); }
+  .status-dead, .status-error{ color:var(--red); }
+  .pill{ display:inline-block; padding:1px 6px; border-radius:3px; font-size:11px; }
+  .pill.ok{ background:rgba(95,217,122,0.15); color:var(--green); }
+  .pill.stale{ background:rgba(255,107,94,0.15); color:var(--red); }
+
+  #termOutput{
+    background:#000; color:#c8f0c8; font-size:13px; line-height:1.4;
+    height:340px; overflow-y:auto; padding:10px; border-radius:4px; white-space:pre-wrap;
+    border:1px solid var(--line);
+  }
+  #termInputRow{ display:flex; gap:8px; margin-top:10px; }
+  #termInput{ flex:1; width:auto; }
+  #termInput::before{ content:"> "; }
+
+  .editor{ display:none; }
+  .editor.open{ display:block; }
+  .editor textarea{ width:100%; height:220px; font-size:12px; }
+  .editor .row{ margin-top:8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>FleetOS Remote Terminal</h1>
+  <div class="sub">bridge_server.py | <span id="pingPill" class="pill stale">no report yet</span></div>
+
+  <section>
+    <h2>Bridge address</h2>
+    <div class="row">
+      <label>bridge_server.py is running at</label>
+      <input id="bridgeUrl" style="width:260px" value="http://127.0.0.1:8787">
+      <button onclick="saveBridgeUrl()">Save &amp; reload</button>
+    </div>
+    <div class="sub" style="margin:0">
+      This page is a static file and can be hosted anywhere (e.g. GitHub Pages), but it always
+      talks to bridge_server.py running on your own PC. Default is right if you're viewing this
+      on the same PC running the bridge. Browsers block plain-http requests from an https page to
+      anything other than 127.0.0.1/localhost, so a remote address (e.g. a Radmin IP) only works
+      if you open this file locally (or allow insecure content for this site in your browser).
+    </div>
+  </section>
+
+  <section>
+    <h2>Terminal (master computer)</h2>
+    <div id="termOutput"></div>
+    <div id="termInputRow">
+      <input id="termInput" style="flex:1" placeholder="type a command, e.g. 'ls' or 'fleetos'" autofocus>
+      <button onclick="sendTerminalLine()">Send</button>
+    </div>
+    <div class="sub" style="margin:8px 0 0">
+      Runs on the master computer as if typed at its real shell prompt (via <code>shell.run</code>).
+      A program that never exits (like re-running <code>fleetos</code>) will freeze this terminal
+      until it's stopped some other way - same as it would in-game.
+    </div>
+  </section>
+
+  <section>
+    <h2>Remote files (on the actual in-game computer)</h2>
+    <div class="row">
+      <label>path</label>
+      <input id="remotePath" style="width:200px" value="config.lua">
+      <button onclick="readRemoteFile()">Read</button>
+      <button onclick="writeRemoteFile()">Write</button>
+    </div>
+    <textarea id="remoteFileContent" style="width:100%;height:160px;font-size:12px"></textarea>
+    <div class="sub" id="remoteFileStatus"></div>
+  </section>
+
+  <section>
+    <h2>Local apps (edit on this PC, then deploy)</h2>
+    <table id="appsTable">
+      <tr><th>App</th><th>Target</th><th colspan="2"></th></tr>
+    </table>
+  </section>
+
+  <section>
+    <h2>Macros (one click = several commands)</h2>
+    <div class="row">
+      <label>target</label>
+      <input id="macroTarget" value="*">
+    </div>
+    <div class="row" id="macrosRow"></div>
+  </section>
+
+  <section>
+    <h2>Fleet status</h2>
+    <div id="masterApps"></div>
+    <table id="nodesTable">
+      <tr><th>Node</th><th>Role</th><th>Apps</th></tr>
+    </table>
+  </section>
+</div>
+
+<script>
+const API_BASE = localStorage.getItem('fleetBridgeUrl') || 'http://127.0.0.1:8787';
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('bridgeUrl').value = API_BASE;
+});
+
+function saveBridgeUrl() {
+  const val = document.getElementById('bridgeUrl').value.trim().replace(/\/+$/, '');
+  if (!val) return;
+  localStorage.setItem('fleetBridgeUrl', val);
+  window.location.reload();
+}
+
+async function postCommand(cmd) {
+  const res = await fetch(API_BASE + '/command', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(cmd),
+  });
+  return res.json(); // { queued: true, id }
+}
+
+// polls /result/<id> a few times until the game has answered - readfile
+// results only live in a single fleetbridge.lua report cycle otherwise.
+async function awaitResult(id, tries = 15, delayMs = 400) {
+  for (let i = 0; i < tries; i++) {
+    const res = await fetch(API_BASE + '/result/' + id);
+    const data = await res.json();
+    if (data.found) return data.result;
+    await new Promise(r => setTimeout(r, delayMs));
+  }
+  return null;
+}
+
+function statusClass(s) {
+  if (s === 'running') return 'status-running';
+  if (s === 'suspended') return 'status-suspended';
+  return 'status-dead';
+}
+
+// ---- Terminal ----
+
+let lastRenderedOutputLen = -1;
+
+function renderTerminal(lines) {
+  if (!lines) return;
+  if (lines.length === lastRenderedOutputLen) return; // avoid scroll-jitter on unchanged output
+  lastRenderedOutputLen = lines.length;
+  const el = document.getElementById('termOutput');
+  const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 20;
+  el.textContent = lines.join('\n');
+  if (atBottom) el.scrollTop = el.scrollHeight;
+}
+
+async function sendTerminalLine() {
+  const input = document.getElementById('termInput');
+  const text = input.value;
+  if (!text) return;
+  input.value = '';
+  await postCommand({ type: 'type', target: 'master', text });
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('termInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') sendTerminalLine();
+  });
+});
+
+// ---- Remote files (on the real in-game computer) ----
+
+// guards against a double-click (or Read then Write in quick succession)
+// racing each other and letting a stale response overwrite a fresher one
+let remoteFileRequestSeq = 0;
+
+async function readRemoteFile() {
+  const mySeq = ++remoteFileRequestSeq;
+  const path = document.getElementById('remotePath').value;
+  const status = document.getElementById('remoteFileStatus');
+  status.textContent = 'reading...';
+  const { id } = await postCommand({ type: 'readfile', target: 'master', path });
+  const result = await awaitResult(id);
+  if (mySeq !== remoteFileRequestSeq) return; // a newer request has since started
+  if (!result) {
+    status.textContent = 'no response (is fleetbridge.lua running?)';
+  } else if (result.error) {
+    status.textContent = 'error: ' + result.error;
+  } else {
+    document.getElementById('remoteFileContent').value = result.content;
+    status.textContent = `read ${result.content.length} bytes from ${path}`;
+  }
+}
+
+async function writeRemoteFile() {
+  const mySeq = ++remoteFileRequestSeq;
+  const path = document.getElementById('remotePath').value;
+  const content = document.getElementById('remoteFileContent').value;
+  const status = document.getElementById('remoteFileStatus');
+  status.textContent = 'writing...';
+  const { id } = await postCommand({ type: 'writefile', target: 'master', path, content });
+  const result = await awaitResult(id);
+  if (mySeq !== remoteFileRequestSeq) return;
+  if (!result) {
+    status.textContent = 'no response (is fleetbridge.lua running?)';
+  } else if (result.error) {
+    status.textContent = 'error: ' + result.error;
+  } else {
+    status.textContent = `wrote ${content.length} bytes to ${path} on the real computer`;
+  }
+}
+
+// ---- Local apps: edit-on-PC + deploy ----
+
+async function loadApps() {
+  const res = await fetch(API_BASE + '/apps');
+  const names = await res.json();
+  const table = document.getElementById('appsTable');
+  table.innerHTML = '<tr><th>App</th><th>Target</th><th colspan="2"></th></tr>';
+  for (const name of names) {
+    const targetId = 'target_' + name;
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${name}</td>
+      <td><input id="${targetId}" value="*"></td>
+      <td><button class="secondary" onclick="toggleEditor('${name}')">Edit</button></td>
+      <td><button onclick="deployApp('${name}', '${targetId}')">Deploy</button></td>`;
+    table.appendChild(tr);
+
+    const editorTr = document.createElement('tr');
+    editorTr.innerHTML = `<td colspan="4">
+      <div class="editor" id="editor_${name}">
+        <textarea id="src_${name}"></textarea>
+        <div class="row">
+          <button class="secondary" onclick="saveApp('${name}')">Save to PC</button>
+          <button onclick="deployApp('${name}', '${targetId}')">Save + Deploy</button>
+          <span id="editorStatus_${name}" class="sub"></span>
+        </div>
+      </div>
+    </td>`;
+    table.appendChild(editorTr);
+  }
+}
+
+async function toggleEditor(name) {
+  const el = document.getElementById('editor_' + name);
+  const isOpen = el.classList.contains('open');
+  if (isOpen) { el.classList.remove('open'); return; }
+  const res = await fetch(API_BASE + '/apps/' + name + '.lua');
+  document.getElementById('src_' + name).value = await res.text();
+  el.classList.add('open');
+}
+
+async function saveApp(name) {
+  const content = document.getElementById('src_' + name).value;
+  await fetch(API_BASE + '/apps/' + name + '.lua', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content }),
+  });
+  document.getElementById('editorStatus_' + name).textContent = 'saved to PC ' + new Date().toLocaleTimeString();
+}
+
+// deploy writes the file but only restarts an app if it was ALREADY
+// running (see fleetnet.lua) - so a fresh install also needs a "run"
+// right after, harmless if it's already going ("already running" error).
+async function deployAndRun(name, target) {
+  const url = API_BASE + '/apps/' + name + '.lua';
+  await postCommand({ type: 'deploy', target, app: name, url });
+  await postCommand({ type: 'run', target, app: name });
+}
+
+async function deployApp(name, targetInputId) {
+  const editorOpen = document.getElementById('editor_' + name)?.classList.contains('open');
+  if (editorOpen) await saveApp(name); // persist edits before deploying
+  const target = document.getElementById(targetInputId).value || '*';
+  await deployAndRun(name, target);
+}
+
+// ---- Macros ----
+
+const MACROS = {
+  'Deploy Master Stack': ['fleetnet', 'fleetregistry', 'fleetmaster', 'raytower_master', 'fleetbridge'],
+  'Deploy Tower Stack': ['fleetnet', 'raytower_slave'],
+};
+
+function renderMacros() {
+  const row = document.getElementById('macrosRow');
+  for (const name in MACROS) {
+    const btn = document.createElement('button');
+    btn.textContent = name;
+    btn.onclick = () => runMacro(name);
+    row.appendChild(btn);
+  }
+}
+
+async function runMacro(name) {
+  const target = document.getElementById('macroTarget').value || '*';
+  for (const app of MACROS[name]) {
+    await deployAndRun(app, target);
+  }
+}
+
+// ---- Status polling (also drives the terminal view) ----
+
+async function refreshStatus() {
+  const res = await fetch(API_BASE + '/status');
+  const data = await res.json();
+  const pill = document.getElementById('pingPill');
+
+  if (data.seconds_since_report == null) {
+    pill.textContent = 'no report yet';
+    pill.className = 'pill stale';
+  } else {
+    const age = data.seconds_since_report.toFixed(1);
+    pill.textContent = `last report ${age}s ago`;
+    pill.className = 'pill ' + (data.seconds_since_report > 10 ? 'stale' : 'ok');
+  }
+
+  const report = data.latest_report;
+  const masterAppsEl = document.getElementById('masterApps');
+  const nodesTable = document.getElementById('nodesTable');
+  nodesTable.innerHTML = '<tr><th>Node</th><th>Role</th><th>Apps</th></tr>';
+
+  if (!report) return;
+
+  renderTerminal(report.output);
+
+  masterAppsEl.innerHTML = (report.masterApps || []).map(entry => {
+    const [name, status] = entry.split(':');
+    return `<span class="${statusClass(status)}">${name} (${status})</span>`;
+  }).join(' &nbsp; ');
+
+  const nodes = report.nodes || {};
+  for (const id in nodes) {
+    const n = nodes[id];
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${id}</td><td>${n.role || '?'}</td><td>${(n.apps || []).join(', ')}</td>`;
+    nodesTable.appendChild(tr);
+  }
+}
+
+loadApps();
+renderMacros();
+refreshStatus();
+setInterval(refreshStatus, 2000);
+</script>
+</body>
+</html>
