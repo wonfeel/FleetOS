@@ -1,0 +1,287 @@
+openapi: 3.0.3
+info:
+  title: FleetOS bridge_server.py API
+  description: >
+    HTTP bridge between a Windows PC and every FleetOS computer in Minecraft.
+    This file is a faithful transcription of bridge_server.py's module
+    docstring - the docstring remains the source of truth if the two ever
+    drift; keep both in sync when adding/changing a route.
+  version: "1.0"
+servers:
+  - url: http://127.0.0.1:8787
+    description: Default local bridge address
+security:
+  - ApiKeyAuth: []
+  - {}
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: >
+        Only enforced if the bridge was started with FLEET_BRIDGE_KEY (or
+        FLEET_BRIDGE_READONLY_KEY for read-only routes) set.
+  parameters:
+    DashboardHeader:
+      name: X-Fleet-Dashboard
+      in: header
+      required: true
+      schema:
+        type: string
+      description: >
+        Required on every state-changing route regardless of API key (CSRF
+        guard) - a plain cross-origin fetch()/form POST can't set this header
+        without a CORS preflight the bridge doesn't specially allow. Exempt on
+        /report, /compute/{name}, /world_call, /admin/reload's underlying
+        cause (all three are only ever called by CC:Tweaked/a compute
+        subprocess, never a browser).
+paths:
+  /status:
+    get:
+      summary: Every known node's latest status
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  nodes:
+                    type: object
+                    additionalProperties:
+                      type: object
+                      properties:
+                        latest_report: { type: object, nullable: true }
+                        seconds_since_report: { type: number, nullable: true }
+                        folder: { type: string }
+  /poll:
+    get:
+      summary: A node's own poll for queued commands (called by fleetbridge.lua, not the dashboard)
+      parameters:
+        - name: node
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Array of queued commands for this node
+  /report:
+    post:
+      summary: A node's status report after every poll cycle (called by fleetbridge.lua)
+      parameters:
+        - name: node
+          in: query
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200": { description: OK }
+  /result/{id}:
+    get:
+      summary: Poll for one command's result by id
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  found: { type: boolean }
+                  result: { nullable: true }
+  /command:
+    post:
+      summary: Queue a command for one node or every known node ("*")
+      parameters:
+        - $ref: "#/components/parameters/DashboardHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type]
+              properties:
+                node: { type: string, description: "specific node id, or \"*\" for every known node" }
+                type:
+                  type: string
+                  enum: [run, kill, deploy, rollback, rollback_kernel, type, readfile, writefile, list, mkdir,
+                         delete, move, update, rename, monitor_touch, configure, force_release_monitor]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  queued: { type: boolean }
+                  id: { type: integer }
+                  nodes: { type: array, items: { type: string } }
+  /node_folder:
+    post:
+      summary: Assign (or clear) a node's dashboard-side folder
+      parameters:
+        - $ref: "#/components/parameters/DashboardHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [node]
+              properties:
+                node: { type: string }
+                folder: { type: string, description: "\"\" clears the assignment" }
+      responses:
+        "200": { description: OK }
+  /admin/reload:
+    post:
+      summary: - save state and re-exec the bridge process in place to pick up a code update
+      description: >
+        Full API key required (not the read-only key). See bridge_server.py's
+        own comment on this route for the Windows PID-change caveat.
+      parameters:
+        - $ref: "#/components/parameters/DashboardHeader"
+      responses:
+        "200":
+          description: OK - process is about to re-exec
+  /compute/{name}:
+    post:
+      summary: Run windows/compute/{name}.py|.exe as a subprocess (off by default, needs FLEET_ENABLE_COMPUTE=1)
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema: { type: string }
+        - name: node
+          in: query
+          required: false
+          schema: { type: string }
+          description: opts the script into "world access" (see _fleetos_world.py)
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200": { description: "whatever the script printed as JSON, or {\"output\": \"<raw text>\"} if not valid JSON" }
+        "403": { description: compute disabled (FLEET_ENABLE_COMPUTE not set) }
+        "503": { description: too many concurrent long-running requests }
+  /world_call:
+    post:
+      summary: Used by windows/compute/_fleetos_world.py to act like a real Lua program on a node
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [node, action]
+              properties:
+                node: { type: string }
+                action: { type: string, enum: [print, gps_locate, peripheral_call, list_peripherals] }
+                args: { type: object }
+      responses:
+        "200": { description: the action's result }
+        "503": { description: too many concurrent long-running requests }
+        "504": { description: target node never answered within WORLD_CALL_TIMEOUT_SECONDS }
+  /apps:
+    get:
+      summary: List every app available in game/apps/, grouped by folder
+      responses:
+        "200": { description: OK }
+    post:
+      summary: Create a brand new app file on this PC
+      parameters:
+        - $ref: "#/components/parameters/DashboardHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+                group: { type: string }
+                content: { type: string }
+      responses:
+        "200": { description: OK }
+        "409": { description: an app with that name already exists }
+  /pcfiles:
+    get:
+      summary: List one directory under game/ or windows/compute/ on this PC
+      parameters:
+        - name: root
+          in: query
+          required: true
+          schema: { type: string, enum: [game, compute] }
+        - name: path
+          in: query
+          schema: { type: string }
+      responses:
+        "200": { description: OK }
+  /pcfiles/write:
+    post:
+      summary: Create/overwrite a PC-side file
+      parameters:
+        - $ref: "#/components/parameters/DashboardHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [root, path]
+              properties:
+                root: { type: string }
+                path: { type: string }
+                content: { type: string }
+      responses:
+        "200": { description: OK }
+  /pcfiles/delete:
+    post:
+      summary: Delete a PC-side file or directory (recursively)
+      parameters:
+        - $ref: "#/components/parameters/DashboardHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [root, path]
+              properties:
+                root: { type: string }
+                path: { type: string }
+      responses:
+        "200": { description: OK }
+  /pcfiles/move:
+    post:
+      summary: Rename/move a PC-side file or directory
+      parameters:
+        - $ref: "#/components/parameters/DashboardHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [root, from, to]
+              properties:
+                root: { type: string }
+                from: { type: string }
+                to: { type: string }
+      responses:
+        "200": { description: OK }

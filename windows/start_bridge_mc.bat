@@ -13,7 +13,9 @@ rem it as install.lua's 2nd argument when bootstrapping a new one) and in
 rem dashboard.html's "API key" field.
 rem set FLEET_BRIDGE_KEY=change-me
 cd /d "%~dp0"
-set FLEET_BRIDGE_HOST=26.76.16.71
+rem EDIT THIS to your own Radmin VPN IP (check with `ipconfig`, look for the
+rem "Radmin VPN" adapter - it's a 26.x.x.x address) before running this.
+set FLEET_BRIDGE_HOST=26.x.x.x
 echo Starting FleetOS bridge server on http://%FLEET_BRIDGE_HOST%:8787 ...
 echo Make sure config.lua's bridgeUrl on the in-game master matches this.
 echo If the game computer can't reach it: check Windows Firewall allows

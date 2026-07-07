@@ -29,8 +29,31 @@ local function authHeaders()
     return apiKey ~= "" and { ["X-API-Key"] = apiKey } or nil
 end
 
+local HTTP_TIMEOUT = 8 -- seconds - see apps/common/fleetbridge.lua's httpRequest for why
+
+-- Async form + manual timer, same reasoning as apps/common/fleetbridge.lua:
+-- http.get blocks with no per-call timeout, so a bridge that never
+-- responds would otherwise hang this one-shot bootstrap indefinitely.
 local function fetch(path)
-    local resp, err = http.get(bridgeUrl .. path, authHeaders())
+    local url = bridgeUrl .. path
+    http.request({ url = url, headers = authHeaders(), timeout = HTTP_TIMEOUT })
+    local timerId = os.startTimer(HTTP_TIMEOUT)
+    local resp, err
+    while true do
+        local event, a, b = os.pullEvent()
+        if event == "http_success" and a == url then
+            os.cancelTimer(timerId)
+            resp = b
+            break
+        elseif event == "http_failure" and a == url then
+            os.cancelTimer(timerId)
+            err = b
+            break
+        elseif event == "timer" and a == timerId then
+            err = "timed out after " .. HTTP_TIMEOUT .. "s"
+            break
+        end
+    end
     if not resp then
         print("[install] failed to fetch " .. path .. ": " .. tostring(err))
         return nil

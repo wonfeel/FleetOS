@@ -1,35 +1,49 @@
 # FleetOS
 
-A mini-OS for CC:Tweaked (Minecraft) computers, plus a Windows-side bridge/dashboard to
-control them remotely. **Every computer is equal, there is no master/slave.** Each one
-runs its own agent and talks to the bridge directly.
+A mini-OS for CC:Tweaked (ComputerCraft, Minecraft) computers, plus a
+Windows-side bridge/dashboard to control an entire fleet of them remotely.
+Every computer is equal - there is no master/slave.
 
-See [`PROJECT_NOTES.md`](PROJECT_NOTES.md) for the full architecture reference, [`quickstart.html`](quickstart.html)
-for a 4-step setup guide, and [`fleetos_guide.html`](fleetos_guide.html) for the in-depth guide
-(Russian). [`guide.html`](guide.html) is a separate guide for the unrelated Raytower/triangulation
-feature.
+> **Note**: every other guide in this repo ([`docs/fleetos_guide.html`](docs/fleetos_guide.html),
+> [`docs/quickstart.html`](docs/quickstart.html), [`docs/guide.html`](docs/guide.html)) is
+> Russian-only - this file is a short English entry point so the project
+> isn't completely opaque to a non-Russian-speaking reader. If you read
+> Russian, start with [`docs/fleetos_guide.html`](docs/fleetos_guide.html)
+> instead - it's the authoritative, in-depth guide.
 
-## Folder structure
+## Layout
 
-- `game/` - everything that runs *inside Minecraft* (kernel `fleetos.lua`, bootstrap `install.lua`,
-  per-node `config.lua`, apps under `apps/`).
-- `windows/` - PC-side tooling: `bridge_server.py` (stdlib-only HTTP server), `dashboard.html`
-  (the web UI, also published here as `index.html` for GitHub Pages), `fleetctl.py` (CLI
-  alternative), `craftos_shim.lua`/`run_fleetos.lua` (run FleetOS as a persistent Windows
-  process without Minecraft, for testing).
-- `test/` - unit tests (`cc_mocks.lua` + test scripts), run from `game/`: `lua ../test/<name>.lua`.
+- [`game/`](game/) - everything that runs *inside Minecraft* (the kernel,
+  `fleetos.lua`, and every app under `game/apps/`). See
+  [`game/apps/README.md`](game/apps/README.md) if you want to write your own app.
+- [`windows/`](windows/) - the PC-side bridge server (`bridge_server.py`,
+  stdlib-only Python, no install needed) and the web dashboard
+  (`dashboard.html`, open `http://127.0.0.1:8787/` once the bridge is
+  running) used to control the fleet remotely, plus a Windows-only local
+  simulation (`craftos_shim.lua`) for developing/testing without Minecraft
+  at all.
+- [`test/`](test/) - unit tests, runnable without Minecraft (`cd game && lua ../test/<name>.lua`).
+- [`docs/`](docs/) - every human-facing guide and the technical reference -
+  see [`docs/README.md`](docs/README.md) for the index.
+- [`reference/`](reference/) - third-party material kept locally for
+  cross-checking real behavior (the CC:Tweaked mod source) - not part of
+  this project, gitignored, safe to delete and re-fetch if you don't need it.
 
-## Dashboard-only hosted copy
+## Quick start
 
-`index.html` (repo root) is a static copy of `windows/dashboard.html`, published via GitHub
-Pages purely for convenience, open it in a browser **on the same PC** running `bridge_server.py`
-(it talks to `http://127.0.0.1:8787` by default; browsers block plain-HTTP requests to any other
-address from an HTTPS page, so a Radmin/remote bridge address won't work from the hosted page
-unless you allow insecure content for this site).
+1. `cd windows && python bridge_server.py` (or `start_bridge.bat`) - starts
+   the bridge on `http://127.0.0.1:8787`.
+2. Open that URL in a browser - that's the dashboard.
+3. On a fresh CC:Tweaked computer in-game: `wget http://<your-pc-ip>:8787/install.lua install` then `install`.
+4. The new computer shows up in the dashboard within a few seconds.
 
-## No authentication by default
+See [`docs/quickstart.html`](docs/quickstart.html) (Russian) for the same
+steps with more detail, or [`docs/fleetos_guide.html`](docs/fleetos_guide.html)
+for the full picture (bridge setup, the optional API key, troubleshooting,
+everything). Admin/security features added in the reliability hardening
+pass (backup/restore, health checks, read-only keys, etc.) are in
+[`docs/hardening_guide.html`](docs/hardening_guide.html).
 
-`bridge_server.py` has no login by default. Anyone who can reach it can run code and
-read/write files on your in-game computers. Keep it bound to `127.0.0.1`/a trusted VPN, or
-set `FLEET_BRIDGE_KEY` (see `fleetos_guide.html`, section 4) if it needs to be reachable by
-others.
+## License
+
+MIT - see [`LICENSE`](LICENSE).

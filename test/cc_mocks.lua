@@ -16,9 +16,22 @@ local virtualFiles = {}
 -- for READS ONLY - this lets fleetos.lua load the real config.lua/apps/*
 -- from H:\MinecraftCode while still sandboxing anything it writes
 -- (rays.dat, fleet_nodes.dat, etc).
+-- extracted so fs.exists can check it too - see craftos_shim.lua's
+-- identical fix/comment for why (real CraftOS's fs.exists returns true for
+-- directories too, but io.open alone never can).
+local function isDirOnDisk(path)
+    local winpath = path:gsub("/", "\\")
+    local pipe = io.popen('if exist "' .. winpath .. '\\" (echo YES) else (echo NO)')
+    if not pipe then return false end
+    local out = pipe:read("l")
+    pipe:close()
+    return out == "YES"
+end
+
 fs = {
     exists = function(path)
         if virtualFiles[path] ~= nil then return true end
+        if isDirOnDisk(path) then return true end
         local f = io.open(path, "r")
         if f then f:close(); return true end
         return false
@@ -44,16 +57,17 @@ fs = {
     end,
     delete = function(path) virtualFiles[path] = nil end,
     copy = function(src, dst) virtualFiles[dst] = virtualFiles[src] end,
+    move = function(from, to)
+        if virtualFiles[from] ~= nil then
+            virtualFiles[to] = virtualFiles[from]
+            virtualFiles[from] = nil
+        else
+            os.rename(from, to)
+        end
+    end,
     combine = function(a, b) return a .. "/" .. b end,
     makeDir = function(_) end,
-    isDir = function(path)
-        local winpath = path:gsub("/", "\\")
-        local pipe = io.popen('if exist "' .. winpath .. '\\" (echo YES) else (echo NO)')
-        if not pipe then return false end
-        local out = pipe:read("l")
-        pipe:close()
-        return out == "YES"
-    end,
+    isDir = isDirOnDisk,
     list = function(path)
         local winpath = path:gsub("/", "\\")
         local entries = {}
@@ -63,6 +77,14 @@ fs = {
             pipe:close()
         end
         return entries
+    end,
+    getSize = function(path)
+        if virtualFiles[path] then return #virtualFiles[path] end
+        local f = io.open(path, "rb")
+        if not f then return 0 end
+        local size = f:seek("end")
+        f:close()
+        return size or 0
     end,
 }
 
@@ -184,6 +206,9 @@ function read() return nil end
 peripheral = {
     find = function(_) return nil end,
     getName = function(_) return "mock" end,
+    isPresent = function(_) return false end,
+    getNames = function() return {} end,
+    call = function(name, method, ...) error("peripheral '" .. tostring(name) .. "' not mocked") end,
 }
 rednet = {
     isOpen = function(_) return true end,
@@ -191,6 +216,15 @@ rednet = {
     broadcast = function(_, _) end,
     send = function(_, _, _) end,
     receive = function(_, _) return nil end,
+}
+
+-- ---- gps ----
+-- Real CraftOS's gps.locate() needs a GPS host constellation (4+ wireless
+-- modems); returning nil (as if none exists) matches that "no GPS network
+-- configured" case, which is the common/default case for a fresh fleet -
+-- tests exercising a real fix should override this per-test.
+gps = {
+    locate = function(_, _) return nil end,
 }
 
 return M

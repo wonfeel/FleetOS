@@ -6,10 +6,21 @@
 -- apps/config.lua copy, see windows/sim/).
 --
 -- Usage (cwd = the node folder):
---   lua <path-to>/run_sim_node.lua
+--   lua <path-to>/run_sim_node.lua [bridge-url] [key]
+--
+-- The optional args write bridge_override.txt before first boot, same as
+-- run_fleetos.lua - see its header comment for the full explanation.
 
 local scriptDir = arg[0]:match("(.*)[/\\]") or "."
 dofile(scriptDir .. "/craftos_shim.lua")
+
+local argBridgeUrl, argBridgeKey = ...
+if argBridgeUrl then
+    local f = fs.open("bridge_override.txt", "w")
+    f.write(textutils.serialize({ url = argBridgeUrl, key = argBridgeKey or "" }))
+    f.close()
+    print("[run_sim_node] bridge override set to " .. argBridgeUrl)
+end
 
 local mainCo = coroutine.create(function()
     dofile("fleetos.lua")

@@ -19,6 +19,18 @@ local CURRENT = nil   -- name of the task presently being resumed (nil outside t
 -- behind it) - tick() below never even looks at this table.
 local minimizedApps = {}
 
+-- Which task (if any) currently owns the monitor for its own full-screen
+-- drawing (claimMonitor()/releaseMonitor(), exposed on the API table) -
+-- forward-declared here (not down in the "Monitor mirror" section where it
+-- conceptually lives) because removeTask() above needs to clear it when a
+-- claiming app is killed, so a dead app can't leave the monitor stuck
+-- showing its last frame with no way back to the FleetOS panel.
+local monitorClaimedBy = nil
+-- name -> true while a claiming app is minimized (monitorClaimedBy forced
+-- nil so the FleetOS panel takes over) - restoreApp() uses this to know to
+-- hand the claim back rather than just clearing the minimized flag.
+local claimBeforeMinimize = {}
+
 local APPS_DIR = "apps"
 -- Apps are grouped by who typically needs them - purely a folder
 -- convention for browsing/deploying, not a permission boundary. spawn()
@@ -240,6 +252,239 @@ term.clear = function()
 end
 
 -- ============================================================
+-- Monitor capture - mirrors whatever gets drawn onto a REAL "monitor"
+-- peripheral into a virtual grid, the same way print()/write() above
+-- mirror the terminal into OUTPUT/COLORED - so a monitor's contents
+-- (FleetOS's own monitor panel below, or an app's own monitor UI like
+-- apps/raytower/raytower_master.lua) can be shown on the dashboard without
+-- needing eyes on the physical block in-game. Hooked once, globally, at
+-- peripheral.find - every method on the returned wrapper forwards to the
+-- real monitor UNCHANGED (in-game visuals are completely unaffected) and
+-- also updates MONITOR_GRID. Only foreground (text) color is tracked per
+-- character - background is one solid color set by clear()/
+-- setBackgroundColor(), since nothing in this codebase's monitor-drawing
+-- code ever varies background per cell (confirmed by grepping every
+-- monitor.* call site before writing this) - a deliberate scope call, not
+-- an oversight.
+-- ============================================================
+
+local MONITOR_GRID = nil        -- { w, h, bg, cx, cy, curFg, cells = {[y]={[x]={ch,fg}}} }
+local monitorBlocksCfg = nil    -- optional {w,h} from config.lua's monitorBlocks - see boot() and getMonitorSnapshot below
+local monitorProxies = {}       -- real peripheral name -> memoized wrapper, so repeated
+                                 -- peripheral.find("monitor") calls (monitorMirrorLoop below
+                                 -- polls this every ~1s) don't rebuild the grid each time
+
+local function blankMonitorRow(w)
+    local row = {}
+    for x = 1, w do row[x] = { ch = " ", fg = colors.white } end
+    return row
+end
+
+local function ensureMonitorGrid(w, h)
+    if not MONITOR_GRID or MONITOR_GRID.w ~= w or MONITOR_GRID.h ~= h then
+        local cells = {}
+        for y = 1, h do cells[y] = blankMonitorRow(w) end
+        MONITOR_GRID = { w = w, h = h, bg = colors.black, cx = 1, cy = 1, curFg = colors.white, cells = cells }
+    end
+end
+
+-- Converts one grid row into {text=,color=} runs - same shape buildSegments()
+-- above already produces for terminal lines, so the dashboard's rendering
+-- code (and anything else consuming COLORED-shaped data) can treat a
+-- monitor snapshot's rows identically to a terminal's.
+local function monitorRowSegments(row, w)
+    local segments = {}
+    local i = 1
+    while i <= w do
+        local c = row[i] and row[i].fg or colors.white
+        local j = i
+        while j + 1 <= w and (row[j + 1] and row[j + 1].fg or colors.white) == c do j = j + 1 end
+        local chars = {}
+        for k = i, j do chars[#chars + 1] = row[k] and row[k].ch or " " end
+        segments[#segments + 1] = { text = table.concat(chars), color = c }
+        i = j + 1
+    end
+    return segments
+end
+
+-- Real CC:Tweaked derives a monitor's character grid from its physical
+-- block size (in-world) via TileMonitor.rebuildTerminal() (see
+-- reference/ComputerCraft-1.79/.../TileMonitor.java, the actual Java
+-- source this formula is transcribed from):
+--   termWidth  = round((blocksWide - 2*(BORDER+MARGIN)) / (textScale*6*PIXEL_SCALE))
+--   termHeight = round((blocksTall - 2*(BORDER+MARGIN)) / (textScale*9*PIXEL_SCALE))
+-- with BORDER=2/16, MARGIN=0.5/16, PIXEL_SCALE=1/64 blocks. Inverting it
+-- recovers the real physical block dimensions from getSize()+getTextScale()
+-- alone - no manual config field needed, and it auto-updates if the
+-- monitor is physically resized in-game (more/fewer blocks) since it's
+-- recomputed from live values every time, not cached from boot.
+-- Confirmed against a live node: w=50, h=26, textScale=1 -> blocks 5x4
+-- (aspect 1.25) - notably NOT the 7x4 guessed by eye from an angled 3D
+-- screenshot, which is exactly the kind of error this formula avoids.
+local BORDER_PLUS_MARGIN = (2.0 / 16.0) + (0.5 / 16.0)
+local PIXEL_SCALE = 1.0 / 64.0
+
+local function computeMonitorBlocks(termW, termH, textScale)
+    local ts = textScale or 1.0
+    local blocksWide = termW * ts * 6.0 * PIXEL_SCALE + 2.0 * BORDER_PLUS_MARGIN
+    local blocksTall = termH * ts * 9.0 * PIXEL_SCALE + 2.0 * BORDER_PLUS_MARGIN
+    return math.floor(blocksWide + 0.5), math.floor(blocksTall + 0.5)
+end
+
+local function wrapMonitor(realMon)
+    local name = peripheral.getName(realMon)
+
+    -- Recomputed on every call (not just the first wrap) even for an
+    -- already-memoized proxy below - a real monitor keeps the same
+    -- peripheral name across an in-game resize (it's the same multiblock
+    -- structure gaining/losing blocks), so this is the only way physical
+    -- size changes get picked up without a reboot.
+    do
+        local w, h = realMon.getSize()
+        ensureMonitorGrid(w, h)
+        local ok, ts = pcall(realMon.getTextScale)
+        local bw, bh = computeMonitorBlocks(w, h, ok and ts or 1.0)
+        MONITOR_GRID.blockW, MONITOR_GRID.blockH = bw, bh
+    end
+
+    local existing = monitorProxies[name]
+    if existing then return existing end
+
+    local proxy = {}
+    -- Real peripheral.getName() identifies a wrapped peripheral by kernel-
+    -- side bookkeeping, not by an object field, and actively ERRORS
+    -- ("table is not a peripheral") if handed a plain Lua table like this
+    -- proxy instead of a genuine registered peripheral - confirmed live on a
+    -- real CC:Tweaked server (this project's own shims are more lenient and
+    -- fake peripheral.getName by checking for a `.name` field, which is why
+    -- this bug never reproduced against them). Storing the real name here
+    -- lets monitorMirrorLoop read `mon.name` directly instead of ever
+    -- calling peripheral.getName() on this proxy at all - see its own
+    -- comment where it does that.
+    proxy.name = name
+    proxy.getSize = function() return realMon.getSize() end
+    proxy.getCursorPos = function() return realMon.getCursorPos() end
+    proxy.isColor = function() return realMon.isColor() end
+    proxy.isColour = proxy.isColor
+    proxy.setTextScale = function(scale) return realMon.setTextScale(scale) end
+    proxy.setCursorPos = function(x, y)
+        MONITOR_GRID.cx, MONITOR_GRID.cy = x, y
+        return realMon.setCursorPos(x, y)
+    end
+    proxy.setTextColor = function(c) MONITOR_GRID.curFg = c; return realMon.setTextColor(c) end
+    proxy.setTextColour = proxy.setTextColor
+    proxy.setBackgroundColor = function(c) MONITOR_GRID.bg = c; return realMon.setBackgroundColor(c) end
+    proxy.setBackgroundColour = proxy.setBackgroundColor
+    proxy.write = function(text)
+        text = tostring(text)
+        local g = MONITOR_GRID
+        if g.cy >= 1 and g.cy <= g.h then
+            local row = g.cells[g.cy]
+            for i = 1, #text do
+                local x = g.cx + i - 1
+                if x >= 1 and x <= g.w then row[x] = { ch = text:sub(i, i), fg = g.curFg } end
+            end
+            g.cx = g.cx + #text
+        end
+        return realMon.write(text)
+    end
+    proxy.clear = function()
+        local g = MONITOR_GRID
+        for y = 1, g.h do g.cells[y] = blankMonitorRow(g.w) end
+        return realMon.clear()
+    end
+    proxy.clearLine = function()
+        local g = MONITOR_GRID
+        if g.cy >= 1 and g.cy <= g.h then g.cells[g.cy] = blankMonitorRow(g.w) end
+        return realMon.clearLine()
+    end
+    proxy.scroll = function(n) return realMon.scroll(n) end
+
+    monitorProxies[name] = proxy
+    return proxy
+end
+
+-- Reserves physical row 1 for the kernel's own title-bar chrome
+-- (drawClaimedTitleBar, see the "Monitor mirror" section below) so a
+-- claiming app's own row 1 (e.g. raytower_master's "====" border, drawn at
+-- its own y=1) never collides with/gets overwritten by the [_][X] bar - the
+-- app instead gets a virtual (w, h-1) screen starting one row down, and
+-- every coordinate it uses is transparently offset by +1 before reaching
+-- the real proxy. Only handed out to the actual claiming app (see
+-- peripheral.find below) - the kernel's own _monitor_mirror task still
+-- gets the raw, unshifted proxy so it can draw the chrome bar at the real
+-- row 1.
+local function shiftedMonitorView(proxy, ownerName)
+    -- While ownerName is minimized, every write is silently dropped instead
+    -- of reaching the real monitor/MONITOR_GRID - a minimized app keeps
+    -- running its own loop unaffected (same as elsewhere), but its redraws
+    -- no longer fight monitorMirrorLoop's panel for the screen. Before this,
+    -- minimizing only cleared monitorClaimedBy (a kernel-side bookkeeping
+    -- flag); the app itself kept calling monitor.write() on its own timer
+    -- completely unaware of that, so its next redraw would silently pop the
+    -- app's screen back up over the panel until the panel's own 1s tick
+    -- redrew over it again - a visible flicker/"random" reappearance with
+    -- no user action involved.
+    local function suppressed() return minimizedApps[ownerName] end
+
+    local shifted = { name = proxy.name }
+    shifted.getSize = function()
+        local w, h = proxy.getSize()
+        return w, h - 1
+    end
+    shifted.getCursorPos = function()
+        local x, y = proxy.getCursorPos()
+        return x, y - 1
+    end
+    shifted.isColor = proxy.isColor
+    shifted.isColour = proxy.isColour
+    shifted.setTextScale = proxy.setTextScale
+    shifted.setCursorPos = function(x, y) if suppressed() then return end return proxy.setCursorPos(x, y + 1) end
+    shifted.setTextColor = proxy.setTextColor
+    shifted.setTextColour = proxy.setTextColour
+    shifted.setBackgroundColor = proxy.setBackgroundColor
+    shifted.setBackgroundColour = proxy.setBackgroundColor
+    shifted.write = function(text) if suppressed() then return end return proxy.write(text) end
+    shifted.clear = function()
+        if suppressed() then return end
+        -- Can't call proxy.clear() (would wipe the chrome bar's row 1 too) -
+        -- clear only the rows the app can actually see, one by one instead.
+        local _, h = proxy.getSize()
+        for y = 2, h do
+            proxy.setCursorPos(1, y)
+            proxy.clearLine()
+        end
+        proxy.setCursorPos(1, 2)
+    end
+    shifted.clearLine = function() if suppressed() then return end return proxy.clearLine() end
+    shifted.scroll = function(n) if suppressed() then return end return proxy.scroll(n) end
+    return shifted
+end
+
+-- Only "monitor" lookups are wrapped - modems/other peripherals pass
+-- through completely untouched, so this can't affect rednet or anything
+-- else that calls peripheral.find for a different kind.
+local realPeripheralFind = peripheral.find
+peripheral.find = function(kind, ...)
+    if kind == "monitor" then
+        local realMon = realPeripheralFind(kind, ...)
+        if not realMon then return nil end
+        local proxy = wrapMonitor(realMon)
+        -- Every task except the kernel's own monitor-mirror loop gets the
+        -- shifted (row-1-reserved) view - covers both the common case (an
+        -- app about to claimMonitor() right after this call) and the rare
+        -- one (an app peeking at the monitor without claiming it), since
+        -- either way _monitor_mirror's unclaimed-panel redraw will already
+        -- own row 1 in that second case too.
+        if CURRENT ~= "_monitor_mirror" then
+            return shiftedMonitorView(proxy, CURRENT)
+        end
+        return proxy
+    end
+    return realPeripheralFind(kind, ...)
+end
+
+-- ============================================================
 -- Program manager
 -- ============================================================
 
@@ -257,12 +502,22 @@ end
 
 -- Lists every app available to run, grouped by folder (in APP_GROUPS
 -- order, flat apps/ last since it's the exception, not the norm).
+-- A leading underscore marks a shared helper module (e.g.
+-- apps/raytower/_raytower_auth.lua) meant to be dofile()'d directly by its
+-- full path, not spawned as a standalone task - same convention
+-- windows/compute/_fleetos_world.py already uses for the same reason.
+-- Excluded here so it doesn't show up as something you'd "run".
+local function isHelperModuleName(name)
+    return name:sub(1, 1) == "_"
+end
+
 local function listAvailableApps()
     local groups = {}
     if fs.isDir(APPS_DIR) then
         local flatNames = {}
         for _, entry in ipairs(fs.list(APPS_DIR)) do
-            if entry:match("%.lua$") and not fs.isDir(fs.combine(APPS_DIR, entry)) then
+            if entry:match("%.lua$") and not fs.isDir(fs.combine(APPS_DIR, entry))
+                    and not isHelperModuleName(entry) then
                 flatNames[#flatNames + 1] = entry:gsub("%.lua$", "")
             end
         end
@@ -271,7 +526,7 @@ local function listAvailableApps()
             local names = {}
             if fs.isDir(dir) then
                 for _, entry in ipairs(fs.list(dir)) do
-                    if entry:match("%.lua$") then
+                    if entry:match("%.lua$") and not isHelperModuleName(entry) then
                         names[#names + 1] = entry:gsub("%.lua$", "")
                     end
                 end
@@ -293,6 +548,32 @@ local function appExists(name)
     return resolveAppPath(name) ~= nil
 end
 
+-- previously there was no way to tell WHICH version of an app's code is
+-- actually running on a given node without diffing file contents by hand -
+-- a fleet-wide deploy that only reached some nodes (a flaky one missed the
+-- command, etc.) was invisible until behavior visibly diverged. Not a real
+-- version number (apps have none) - a short content checksum, cheap enough
+-- to compute on every report, good enough to tell "same code" from
+-- "different code" across nodes at a glance. Not cryptographic - collisions
+-- are theoretically possible, just extremely unlikely to matter for this.
+local function simpleChecksum(content)
+    local sum = 0
+    for i = 1, #content do
+        sum = (sum * 31 + content:byte(i)) % 0xFFFFFFFF
+    end
+    return ("%x"):format(sum)
+end
+
+local function appVersion(name)
+    local path = resolveAppPath(name)
+    if not path then return nil end
+    local f = fs.open(path, "r")
+    if not f then return nil end
+    local content = f.readAll()
+    f.close()
+    return simpleChecksum(content)
+end
+
 -- Starts an app as a background task. fnOrName is either a function
 -- (ad-hoc task) or a string naming a file in /apps/.
 local function spawn(nameOrPath, fnOrNil)
@@ -303,9 +584,12 @@ local function spawn(nameOrPath, fnOrNil)
         if not path then
             return false, "app not found: " .. name
         end
-        local ok, loaded = pcall(loadfile, path)
+        local ok, loaded, loadErr = pcall(loadfile, path)
         if not ok or not loaded then
-            return false, "failed to load: " .. tostring(loaded)
+            -- loadfile returns (nil, message) on a syntax error rather than
+            -- raising - pcall then reports ok=true with loaded=nil, so the
+            -- real reason is loadErr, not whatever pcall itself produced.
+            return false, "failed to load: " .. tostring(loadErr or loaded)
         end
         fn = loaded
     end
@@ -333,6 +617,8 @@ end
 local function removeTask(name)
     RUNNING[name] = nil
     minimizedApps[name] = nil
+    if monitorClaimedBy == name then monitorClaimedBy = nil end
+    claimBeforeMinimize[name] = nil
     for i, n in ipairs(ORDER) do
         if n == name then table.remove(ORDER, i) break end
     end
@@ -363,12 +649,23 @@ end
 local function minimizeApp(name)
     if not RUNNING[name] then return false, "not running: " .. name end
     minimizedApps[name] = true
+    -- If this app currently owns the monitor for its own drawing, force the
+    -- claim back to the kernel (so the FleetOS panel appears immediately,
+    -- like minimizing a real window) and remember to hand it back on restore.
+    if monitorClaimedBy == name then
+        monitorClaimedBy = nil
+        claimBeforeMinimize[name] = true
+    end
     return true
 end
 
 local function restoreApp(name)
     if not RUNNING[name] then return false, "not running: " .. name end
     minimizedApps[name] = nil
+    if claimBeforeMinimize[name] then
+        claimBeforeMinimize[name] = nil
+        monitorClaimedBy = name
+    end
     return true
 end
 
@@ -378,8 +675,119 @@ local function taskState(name)
 end
 
 -- ============================================================
+-- Bridge override - lets the bridge address/key fleetbridge.lua talks to
+-- be changed without editing config.lua, from either shell interpreter
+-- (this kernel's own runShellLine, used by remote "type" commands via the
+-- dashboard/fleetbridge, or the apps/common/shell.lua REPL) - both call
+-- these instead of duplicating the file I/O. See apps/common/
+-- fleetbridge.lua's header comment for the full BASE_URL/API_KEY priority
+-- order this file participates in.
+-- ============================================================
+
+local BRIDGE_OVERRIDE_FILE = "bridge_override.txt"
+
+local function restartBridgeIfRunning()
+    if RUNNING["fleetbridge"] then
+        kill("fleetbridge")
+        spawn("fleetbridge")
+        return true
+    end
+    return false
+end
+
+local function setBridgeOverride(url, key)
+    local f = fs.open(BRIDGE_OVERRIDE_FILE, "w")
+    f.write(textutils.serialize({ url = url, key = key or "" }))
+    f.close()
+    return true, restartBridgeIfRunning()
+end
+
+local function clearBridgeOverride()
+    if fs.exists(BRIDGE_OVERRIDE_FILE) then fs.delete(BRIDGE_OVERRIDE_FILE) end
+    return true, restartBridgeIfRunning()
+end
+
+local function getBridgeOverride()
+    if not fs.exists(BRIDGE_OVERRIDE_FILE) then return nil end
+    local f = fs.open(BRIDGE_OVERRIDE_FILE, "r")
+    local content = f.readAll()
+    f.close()
+    local ok, decoded = pcall(textutils.unserialize, content)
+    return (ok and type(decoded) == "table") and decoded or nil
+end
+
+-- same override-file pattern as the bridge address above, for the
+-- `startup` app list - lets fleetbridge.lua's new "configure" command push a
+-- new startup list (and/or bridge address, via setBridgeOverride above) to
+-- many nodes at once from the dashboard, instead of hand-editing config.lua
+-- on every single computer. Deliberately NOT rewriting config.lua's actual
+-- Lua source (which may have comments/formatting worth preserving, and a
+-- half-written rewrite could corrupt it) - loadConfig() below overlays this
+-- on top of whatever config.lua itself says, same relationship
+-- bridge_override.txt has with config.lua's bridgeUrl/apiKey fields.
+local STARTUP_OVERRIDE_FILE = "startup_override.txt"
+
+local function setStartupOverride(startupList)
+    local f = fs.open(STARTUP_OVERRIDE_FILE, "w")
+    f.write(textutils.serialize(startupList))
+    f.close()
+    return true
+end
+
+local function clearStartupOverride()
+    if fs.exists(STARTUP_OVERRIDE_FILE) then fs.delete(STARTUP_OVERRIDE_FILE) end
+    return true
+end
+
+local function getStartupOverride()
+    if not fs.exists(STARTUP_OVERRIDE_FILE) then return nil end
+    local f = fs.open(STARTUP_OVERRIDE_FILE, "r")
+    local content = f.readAll()
+    f.close()
+    local ok, decoded = pcall(textutils.unserialize, content)
+    return (ok and type(decoded) == "table") and decoded or nil
+end
+
+-- ============================================================
 -- Scheduler - resumes every live task on each OS event
 -- ============================================================
+
+-- runaway-loop guard. A spawned app that never yields (no os.pullEvent/
+-- os.sleep at all, e.g. an infinite "while true do end") previously hung the
+-- ENTIRE kernel forever - tick()'s coroutine.resume() simply never returns,
+-- so no other task, the monitor panel, or fleetbridge itself ever runs again.
+-- debug.sethook's instruction-count hook forces an error inside the
+-- misbehaving coroutine once it's run too long without yielding control back
+-- - that surfaces through the normal "if not ok" crash path below, killing
+-- only that one app via removeTask() (which also releases a stuck monitor
+-- claim - see) instead of freezing the node. Feature-detected + pcall'd:
+-- if the Lua environment doesn't support per-coroutine hooks (uncertain on
+-- CC:Tweaked's Cobalt VM), this silently no-ops and behavior is unchanged
+-- from before - a documented limitation there, not a crash.
+local INSTR_BUDGET = 20000000
+local hasDebugHook = type(debug) == "table" and type(debug.sethook) == "function"
+
+-- Bug fix: found live, in a real game session - the watchdog was also being
+-- armed on the kernel's OWN internal tasks (_monitor_mirror, _supervisor -
+-- anything with a leading underscore, same naming convention used
+-- elsewhere for "kernel-owned, not a spawned app"), and _monitor_mirror was
+-- observed dying silently on its very first tick on a real CC:Tweaked
+-- server (blank monitor, missing from fleetos.list() entirely) - most
+-- likely debug.sethook's count-hook semantics on CC:Tweaked's Cobalt VM
+-- don't exactly match a redraw loop's real Lua-instruction cost the way
+-- they do under desktop Lua (where this was tested and never reproduced).
+-- The watchdog's actual purpose is protecting the kernel from a BUGGY
+-- THIRD-PARTY APP hanging everything else - it was never meant to police
+-- kernel-authored code we already trust, so kernel tasks are now exempt
+-- from it entirely rather than trying to guess the right budget for them.
+local function isKernelTaskName(name)
+    return name:sub(1, 1) == "_"
+end
+
+local function instrBudgetHookFired()
+    error("runaway loop: task ran " .. INSTR_BUDGET ..
+          "+ instructions without yielding (killed by kernel watchdog)", 0)
+end
 
 local function tick(event)
     local dead = {}
@@ -391,6 +799,9 @@ local function tick(event)
                 dead[#dead + 1] = name
             elseif task.filter == nil or task.filter == event[1] then
                 CURRENT = name
+                if hasDebugHook and not isKernelTaskName(name) then
+                    pcall(debug.sethook, task.co, instrBudgetHookFired, "", INSTR_BUDGET)
+                end
                 local ok, filterOrErr = coroutine.resume(task.co, table.unpack(event))
                 CURRENT = nil
                 if coroutine.status(task.co) == "dead" then
@@ -417,12 +828,16 @@ end
 -- ============================================================
 
 local function loadConfig()
+    local cfg
     if not fs.exists("config.lua") then
-        return { startup = {} }
+        cfg = { startup = {} }
+    else
+        local ok, loaded = pcall(dofile, "config.lua")
+        cfg = (ok and type(loaded) == "table") and loaded or { startup = {} }
     end
-    local ok, cfg = pcall(dofile, "config.lua")
-    if ok and type(cfg) == "table" then return cfg end
-    return { startup = {} }
+    local startupOverride = getStartupOverride()
+    if startupOverride then cfg.startup = startupOverride end
+    return cfg
 end
 
 -- ============================================================
@@ -472,8 +887,6 @@ end
 -- tracked by task name, not a raw flag, so a claiming app that crashes or
 -- gets killed automatically releases the monitor next tick.
 -- ============================================================
-
-local monitorClaimedBy = nil
 
 -- Per-state title-bar-style button clusters, right-aligned like a Windows
 -- window's [_][X] - every app gets SOME control here regardless of state
@@ -595,21 +1008,126 @@ local ROW_ACTION = {
     restore = function(name) restoreApp(name) end,
 }
 
+-- Overlaid on row 1 whenever an app has claimed the monitor for its own
+-- full-screen drawing (see monitorClaimedBy) - every full-screen app gets a
+-- Windows-style title bar (its name + [_][X]) for free, without that app
+-- needing to draw one itself or know anything about being "closable" -
+-- same reasoning as STATE_BUTTONS above (a consistent control area
+-- regardless of what the app underneath is doing). Returns rowApp shaped
+-- like drawMonitorPanel's, but with only row 1 populated.
+local function drawClaimedTitleBar(mon, name)
+    local w = select(1, mon.getSize())
+    local buttons = {
+        { text = "[_]", color = colors.yellow, action = "minimize" },
+        { text = "[X]", color = colors.red, action = "close" },
+    }
+    local btnWidth = 0
+    for _, b in ipairs(buttons) do btnWidth = btnWidth + #b.text end
+
+    local nameWidth = math.max(0, w - btnWidth - 1)
+    local nameText = (" " .. name):sub(1, nameWidth)
+    nameText = nameText .. string.rep(" ", math.max(0, nameWidth - #nameText))
+
+    mon.setBackgroundColor(colors.gray)
+    mon.setCursorPos(1, 1)
+    mon.setTextColor(colors.white)
+    mon.write(nameText:sub(1, w))
+
+    local btnRanges = {}
+    if w >= btnWidth then
+        local x = w - btnWidth + 1
+        for _, b in ipairs(buttons) do
+            mon.setCursorPos(x, 1)
+            mon.setTextColor(b.color)
+            mon.write(b.text)
+            btnRanges[#btnRanges + 1] = { action = b.action, from = x, to = x + #b.text - 1 }
+            x = x + #b.text
+        end
+    end
+    mon.setBackgroundColor(colors.black)
+    mon.setTextColor(colors.white)
+
+    return { [1] = { name = name, buttons = btnRanges } }
+end
+
+-- Shared between monitorMirrorLoop's own real monitor_touch handling below
+-- and touchMonitor() (exposed on the fleetos API table further down) - the
+-- latter lets a REMOTE "monitor_touch" command (see fleetbridge.lua) fire
+-- the exact same run/kill/minimize/restore/collapse-toggle a real finger
+-- tap would, via the SAME hit-testing (handleMonitorTap), not a duplicated
+-- copy of it. touchMonitor() deliberately does NOT go through a simulated
+-- os.queueEvent("monitor_touch", ...) - tried that first, but this
+-- project's Windows-simulation shim can't deliver it reliably (fleetbridge
+-- itself calls an UNFILTERED os.pullEvent() for its own http wait right
+-- after handling any command, which would silently swallow the very event
+-- it just queued before monitorMirrorLoop ever saw it - a real CraftOS
+-- event queue doesn't have this quirk, but no local shim reproduces one
+-- perfectly either). Calling straight into the same functions a real tap
+-- calls sidesteps that entirely and works identically in-game.
+local monitorCollapsed = false
+local monitorRowApp = {}
+
+local function toggleMonitorCollapse()
+    monitorCollapsed = not monitorCollapsed
+end
+
+local function handleMonitorTap(x, y)
+    -- A claimed app's title bar (row 1) is checked first since it takes
+    -- priority over the launcher panel's "tap header to collapse" - only
+    -- fall back to that when nothing claimed the monitor (monitorRowApp[1]
+    -- is only ever populated when claimed - see drawClaimedTitleBar).
+    local info = monitorRowApp[y]
+    if info then
+        for _, b in ipairs(info.buttons) do
+            if x >= b.from and x <= b.to then
+                ROW_ACTION[b.action](info.name)
+                return true
+            end
+        end
+        return false, "no button there"
+    end
+    if y == 1 then
+        toggleMonitorCollapse()
+        return true
+    end
+    return false, "nothing clickable there"
+end
+
 local function monitorMirrorLoop()
-    local rowApp = {}
     local monName = nil
-    local collapsed = false
 
     local function redraw()
         local claimed = monitorClaimedBy ~= nil and RUNNING[monitorClaimedBy] ~= nil
         local mon = peripheral.find("monitor")
-        if mon and not claimed then
-            monName = peripheral.getName(mon)
-            local ok, result = pcall(drawMonitorPanel, mon, collapsed)
-            rowApp = ok and result or {}
-        else
+        if not mon then
             monName = nil
-            rowApp = {}
+            monitorRowApp = {}
+            return
+        end
+        -- Bug fix: was `peripheral.getName(mon)` - real CC:Tweaked's native
+        -- peripheral.getName() identifies a peripheral via its own internal
+        -- registry, not by inspecting the table it's handed, and errors
+        -- ("bad argument #1 (table is not a peripheral)") on our own
+        -- hand-built Lua proxy table instead of a genuine registered
+        -- peripheral object. Only this project's own shims (craftos_shim.lua/
+        -- test/cc_mocks.lua) implement a fake peripheral.getName that's
+        -- lenient enough to accept a plain table with a `.name` field - real
+        -- CC:Tweaked isn't, which is exactly why wrapMonitor already stores
+        -- that same name on the proxy as `.name` (see its own comment) -
+        -- reading it directly here avoids the native call on a non-native
+        -- object entirely, and works identically in both environments.
+        -- Found live: this crashed _monitor_mirror on every single tick on
+        -- a real CC:Tweaked server (never reproduced against the shim/mocks,
+        -- which is exactly why it went unnoticed until now).
+        monName = mon.name
+        if claimed then
+            -- Don't touch the app's own drawing below row 1 - just overlay
+            -- a title bar on top of whatever it already wrote, every tick.
+            local ok, result = pcall(drawClaimedTitleBar, mon, monitorClaimedBy)
+            monitorRowApp = ok and result or {}
+        else
+            local ok, result = pcall(drawMonitorPanel, mon, monitorCollapsed)
+            monitorRowApp = ok and result or {}
         end
     end
 
@@ -621,21 +1139,9 @@ local function monitorMirrorLoop()
         if event[1] == "timer" and event[2] == timerId then
             timerId = os.startTimer(1)
             redraw()
-        elseif event[1] == "monitor_touch" and event[2] == monName and event[4] == 1 then
-            collapsed = not collapsed
-            redraw()
         elseif event[1] == "monitor_touch" and event[2] == monName then
-            local x, y = event[3], event[4]
-            local info = rowApp[y]
-            if info then
-                for _, b in ipairs(info.buttons) do
-                    if x >= b.from and x <= b.to then
-                        ROW_ACTION[b.action](info.name)
-                        redraw()
-                        break
-                    end
-                end
-            end
+            handleMonitorTap(event[3], event[4])
+            redraw()
         end
     end
 end
@@ -644,12 +1150,45 @@ end
 -- Entry point
 -- ============================================================
 
+-- startup-app supervisor. Previously a crashed/killed startup app
+-- (most critically fleetbridge - if it dies, this node goes silent to the
+-- bridge and stays silent, since nothing polls/reports for it anymore)
+-- just stayed dead forever: tick()'s dead-task sweep only ever removes a
+-- finished coroutine, nothing ever restarts one. Runs as an ordinary task
+-- through the same tick() scheduler (though - being a kernel task itself,
+-- name "_supervisor" - it's now EXEMPT from the instruction-budget guard,
+-- same as _monitor_mirror; see that guard's own comment for why).
+--
+-- Also restarts _monitor_mirror if it's ever not running - belt-and-
+-- suspenders on top of exempting it from the guard (see that fix's own
+-- comment): if it dies for any OTHER reason, a real monitor would otherwise
+-- stay permanently blank/unresponsive with nothing to bring it back.
+local SUPERVISOR_INTERVAL = 5
+local function supervisorLoop(startupApps)
+    while true do
+        os.sleep(SUPERVISOR_INTERVAL)
+        for _, appName in ipairs(startupApps) do
+            if not RUNNING[appName] then
+                local ok = spawn(appName)
+                if ok then
+                    print("[_supervisor] restarted '" .. appName .. "' (was not running)")
+                end
+            end
+        end
+        if not RUNNING["_monitor_mirror"] then
+            spawn("_monitor_mirror", monitorMirrorLoop)
+            print("[_supervisor] restarted '_monitor_mirror' (was not running)")
+        end
+    end
+end
+
 local function boot()
     if not fs.exists(APPS_DIR) then
         fs.makeDir(APPS_DIR)
     end
 
     local cfg = loadConfig()
+    monitorBlocksCfg = cfg.monitorBlocks
     for _, appName in ipairs(cfg.startup or {}) do
         local ok, err = spawn(appName)
         if not ok then
@@ -658,6 +1197,7 @@ local function boot()
     end
 
     spawn("_monitor_mirror", monitorMirrorLoop)
+    spawn("_supervisor", function() supervisorLoop(cfg.startup or {}) end)
 
     printStatus()
 
@@ -671,6 +1211,24 @@ local function boot()
     end
 end
 
+-- minimal IPC between apps. Previously the only way for two spawned
+-- apps to share anything was a global variable (invisible/fragile - any app
+-- could stomp on any other's globals with no namespacing at all) or a file
+-- on disk (works, but heavyweight and slow for anything more frequent than
+-- occasional config-style data). Two independent, deliberately simple
+-- primitives, not a full message-passing framework:
+--   - A shared key-value table (setShared/getShared) for "the current
+--     state of X, whoever asks last wins" data (e.g. raytower's solved
+--     position, so a hypothetical dashboard-summary app could read it
+--     without parsing rays.dat itself).
+--   - A publish/subscribe event (publish, using os.queueEvent under the
+--     hood) for "something just happened" notifications - any app doing
+--     os.pullEvent("fleetos_message") sees every publish() from every
+--     other app, filtering on the topic field itself (same one-event-many-
+--     listeners model tick() already uses for every other event, so this
+--     doesn't introduce a new dispatch mechanism, just a new event name).
+local sharedState = {}
+
 -- expose kernel API to spawned apps via a global table, since apps are
 -- loaded with loadfile (fresh env) rather than required as modules
 _G.fleetos = {
@@ -683,7 +1241,20 @@ _G.fleetos = {
     -- can use it, not just the monitor panel.
     minimize = minimizeApp,
     restore = restoreApp,
+    -- change/inspect/clear which bridge fleetbridge.lua talks to, without
+    -- editing config.lua - see the "Bridge override" section above.
+    setBridge = setBridgeOverride,
+    clearBridge = clearBridgeOverride,
+    getBridgeInfo = getBridgeOverride,
+    -- bulk-configurable startup app list, same override-file pattern
+    -- as the bridge address above - see setStartupOverride's comment.
+    setStartup = setStartupOverride,
+    clearStartup = clearStartupOverride,
+    getStartupOverride = getStartupOverride,
     listAvailableApps = listAvailableApps,
+    -- short content-checksum "version" for a given app - see
+    -- appVersion's own comment above. nil if the app doesn't exist.
+    appVersion = appVersion,
     -- resolves where an app's file lives (its existing group folder if
     -- any), or where a brand new one should be created (flat apps/) -
     -- used by fleetbridge.lua's deploy/rollback so it writes to the same
@@ -692,12 +1263,29 @@ _G.fleetos = {
         return resolveAppPath(name) or fs.combine(APPS_DIR, name .. ".lua")
     end,
     current = function() return CURRENT end,
+    -- see the "minimal IPC between apps" comment above.
+    setShared = function(key, value) sharedState[key] = value end,
+    getShared = function(key) return sharedState[key] end,
+    -- pcall'd like touchMonitor's os.queueEvent use elsewhere in this file -
+    -- this project's test mocks/Windows shim don't implement a real
+    -- CraftOS-style event queue (os.queueEvent doesn't exist in either), so
+    -- this safely no-ops there instead of erroring; works as a real
+    -- broadcast in-game, where os.queueEvent is a native primitive.
+    publish = function(topic, data) pcall(os.queueEvent, "fleetos_message", topic, data, CURRENT) end,
     -- Call from within a running app to take over the "monitor"
     -- peripheral for its own display (e.g. raytower_master.lua) - the
     -- kernel's terminal mirror then leaves it alone until this app stops
     -- running (killed, crashed, or exits), no explicit release needed.
     claimMonitor = function() monitorClaimedBy = CURRENT end,
     releaseMonitor = function() if monitorClaimedBy == CURRENT then monitorClaimedBy = nil end end,
+    -- belt-and-suspenders: un-claims the monitor regardless of which app
+    -- holds it, without killing that app - for a remote "the screen is stuck
+    -- and I can't reach a terminal" situation. Normally unnecessary now that
+    -- a hung claiming app gets killed by the instruction-budget watchdog
+    -- (which already clears monitorClaimedBy via removeTask), but this covers
+    -- a claiming app that's alive and yielding fine, just never redrawing/
+    -- releasing on its own (e.g. waiting on something that'll never happen).
+    forceReleaseMonitor = function() monitorClaimedBy = nil end,
     -- returns the last `n` captured output lines (default: all buffered,
     -- up to MAX_OUTPUT_LINES). Includes the current in-progress line (e.g.
     -- a "shell> " prompt still waiting on its newline) so a remote viewer
@@ -711,6 +1299,56 @@ _G.fleetos = {
     -- faithfully instead of just white-on-black text.
     getColoredOutput = function(n)
         return tailWithCurrent(COLORED, buildSegments(currentLine, currentColors), currentLine == "", n)
+    end,
+    -- Returns a snapshot of whatever's actually drawn on this computer's
+    -- attached monitor peripheral (see "Monitor capture" above), or nil if
+    -- no monitor has ever been found/drawn to this session. Same
+    -- {text=,color=} row shape as getColoredOutput() - {w, h, bg,
+    -- rows = { [y] = {segments...} } }.
+    getMonitorSnapshot = function()
+        local g = MONITOR_GRID
+        if not g then return nil end
+        local rows = {}
+        for y = 1, g.h do rows[y] = monitorRowSegments(g.cells[y], g.w) end
+        return {
+            w = g.w, h = g.h, bg = g.bg, rows = rows,
+            -- Physical block dimensions - auto-derived every tick from
+            -- getSize()/getTextScale() via the real CC:Tweaked formula (see
+            -- computeMonitorBlocks's comment), overridable by config.lua's
+            -- monitorBlocks for the rare case the auto value is off (e.g. a
+            -- CC:Tweaked version with different rendering constants). Lets
+            -- the dashboard render the exact real aspect ratio instead of a
+            -- rougher approximation from character counts alone.
+            blockW = (monitorBlocksCfg and monitorBlocksCfg.w) or g.blockW,
+            blockH = (monitorBlocksCfg and monitorBlocksCfg.h) or g.blockH,
+        }
+    end,
+    -- Simulates a real finger tap at character column/row (x, y) on
+    -- whatever monitor is currently attached - calls straight into
+    -- handleMonitorTap (see the comment above monitorMirrorLoop), the exact
+    -- same hit-testing/dispatch a real monitor_touch event goes through,
+    -- rather than firing a fake event (see that comment for why). Lets the
+    -- dashboard's monitor emulation be genuinely clickable, not just a
+    -- picture. Returns false if no monitor has ever been found/drawn to
+    -- this session.
+    touchMonitor = function(x, y)
+        if not MONITOR_GRID then return false, "no monitor attached" end
+        local ok, err = handleMonitorTap(x, y)
+        -- a remote monitor_touch (dashboard click) previously only ever
+        -- reached the kernel's own chrome (handleMonitorTap above) - any
+        -- ordinary app doing os.pullEvent("monitor_touch") to react to taps
+        -- itself (not just the launcher panel/title bar) would never see a
+        -- remote one, only a real physical tap. Also queueing the real event
+        -- here fixes that for actual in-game nodes; pcall'd and best-effort
+        -- since this project's Windows-simulation shim doesn't reproduce a
+        -- real CraftOS event queue perfectly (see monitorMirrorLoop's own
+        -- comment above) - the direct handleMonitorTap() call above is what
+        -- keeps kernel chrome working regardless of whether this fires.
+        pcall(function()
+            local mon = peripheral.find("monitor")
+            if mon then os.queueEvent("monitor_touch", mon.name, x, y) end
+        end)
+        return ok, err
     end,
     -- Runs a line of text from a remote terminal (the web dashboard's
     -- "type" command, or apps/common/shell.lua's own prompt). First tries
@@ -759,6 +1397,28 @@ _G.fleetos = {
         elseif cmd == "apps" then
             for _, g in ipairs(listAvailableApps()) do
                 print("  [" .. g.name .. "] " .. table.concat(g.apps, ", "))
+            end
+            return true
+
+        elseif cmd == "bridge" then
+            if parts[2] == "clear" then
+                local _, restarted = clearBridgeOverride()
+                print("bridge override cleared - back to config.lua's bridgeUrl/apiKey")
+                if restarted then print("fleetbridge restarted") end
+            elseif not parts[2] then
+                local info = getBridgeOverride()
+                if info then
+                    print("bridge override: " .. tostring(info.url)
+                        .. ((info.key and info.key ~= "") and " (key set)" or " (no key)"))
+                else
+                    print("no bridge override set - using config.lua's bridgeUrl/apiKey (if any)")
+                end
+                print("Usage: bridge <url> [key]  |  bridge clear")
+            else
+                local _, restarted = setBridgeOverride(parts[2], parts[3])
+                print("bridge set to " .. parts[2] .. ((parts[3] and parts[3] ~= "") and " (with key)" or ""))
+                print(restarted and "fleetbridge restarted with new settings"
+                    or "fleetbridge isn't running - start it with 'run fleetbridge'")
             end
             return true
         end

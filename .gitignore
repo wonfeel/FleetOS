@@ -4,15 +4,48 @@
 .site-update/
 tempCodeRunnerFile.lua
 
+# Third-party reference material (full CC:Tweaked mod source, kept locally
+# for cross-checking real behavior - see docs/PROJECT_NOTES.md's "Monitor
+# emulation" section) - not our code, not tracked
+reference/
+
 # Local multi-node simulation (windows/run_sim_node.lua spins these up on
 # demand from game/ - throwaway copies + generated state, not source)
 windows/sim/
 
-# Generated at runtime by fleetbridge.lua's deploy/rename commands - never
+# Generated at runtime by fleetbridge.lua's deploy/rename commands, or the
+# `bridge` shell command / run_fleetos.lua's command-line args - never
 # hand-authored, and specific to whichever computer produced them
 *.bak
 node_id.txt
+bridge_override.txt
+fake_pos.txt
+
+# bridge_server.py's persisted node->folder assignments and queued-command/
+# results state (per-install state, not source)
+windows/node_meta.json
+windows/bridge_state.json
+
+# Auto-generated FLEET_BRIDGE_KEY (only created if you bind beyond localhost
+# without setting your own) - a per-install secret, never source
+windows/bridge_key.txt
+
+# Per-node output logs collected server-side (Ад6) - runtime data, not source
+windows/logs/
 
 # Python bytecode cache
 __pycache__/
 *.pyc
+
+# bridge_server.py's rotating log file (bridge.log for the default port 8787,
+# bridge-<port>.log for any other port - see LOG_PATH's comment), stdout
+# capture, and background-mode PID file
+windows/bridge.log*
+windows/bridge-*.log*
+windows/bridge_stdout.log
+windows/bridge.pid
+
+# Compiled compute-offload binaries (e.g. triangulation.cpp -> .exe) - build
+# locally with your own toolchain, machine-specific, not source
+windows/compute/*.exe
+windows/compute/*.o

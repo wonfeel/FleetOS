@@ -29,7 +29,7 @@ return {
     -- at your PC's Radmin-assigned IP instead (and start the bridge with
     -- windows/start_bridge_mc.bat, not start_bridge.bat), e.g.:
     --   bridgeUrl = "http://26.76.16.71:8787",
-    bridgeUrl = "http://26.76.16.71:8787",
+    bridgeUrl = "http://127.0.0.1:8787",
 
     -- Optional: only needed if you started bridge_server.py with
     -- FLEET_BRIDGE_KEY set - must match it exactly, or every request from
@@ -42,4 +42,31 @@ return {
     -- apps/raytower_master.lua.
     -- raytowerForward = { x = 1, y = 0, z = 0 },
     -- raytowerQSign = { 1, 1, 1 },
+
+    -- Optional: shared secret for raytower's rednet traffic - set the
+    -- SAME value here on the master and every slave tower to turn on
+    -- packet signing + replay protection (see apps/raytower/raytower_auth.lua).
+    -- Left unset, rednet traffic is unsigned (any player with a modem in
+    -- range could forge/replay packets) - fine for a quick test, not
+    -- recommended for a real multiplayer server.
+    -- raytowerSecret = "some-shared-secret",
+
+    -- Optional: base rednet-poll interval in seconds for apps/raytower/
+    -- raytower_master.lua - trade off position-fix latency vs. rednet/
+    -- server load for your own setup. Default 1.0 if unset. The app also
+    -- backs off further on its own once the solved position is stable -
+    -- see raytower_master.lua's own comment.
+    -- raytowerPollInterval = 1.0,
+
+    -- Optional override: physical size of this computer's attached
+    -- monitor, in MONITOR BLOCKS (not characters), e.g. { w = 7, h = 4 }
+    -- for a monitor built 7 blocks wide by 4 tall. Normally you don't need
+    -- this - fleetos.lua auto-derives the real block size every tick from
+    -- monitor.getSize()/getTextScale() using CC:Tweaked's own sizing
+    -- formula (see computeMonitorBlocks in fleetos.lua), so the dashboard's
+    -- monitor emulation already renders at the true in-game aspect ratio
+    -- and updates itself if you physically resize the monitor. Only set
+    -- this if that auto-detection is ever visibly wrong for your
+    -- CC:Tweaked version.
+    -- monitorBlocks = { w = 7, h = 4 },
 }

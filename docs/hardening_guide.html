@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FleetOS - гайд по надёжности и безопасности</title>
+<style>
+  :root{
+    --bg: #0c0f0d; --panel: #12160f; --panel-2: #171c14; --line: #2a3324;
+    --amber: #ffb300; --amber-dim: #a87400; --text: #d8dccb; --text-dim: #8a9280;
+    --green: #5fd97a; --red: #ff6b5e; --cyan: #6fd3d9; --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  }
+  *{box-sizing:border-box;}
+  body{ background:var(--bg); color:var(--text); font-family:var(--mono); font-size:14px; margin:0; padding:0 20px 60px; line-height:1.55; }
+  .wrap{ max-width:920px; margin:0 auto; }
+  h1{ color:var(--amber); font-size:26px; margin:28px 0 4px; }
+  .sub{ color:var(--text-dim); font-size:13px; margin-bottom:20px; }
+  h2{ color:var(--amber); font-size:18px; margin:0 0 12px; border-bottom:1px solid var(--line); padding-bottom:8px; }
+  h3{ color:var(--cyan); font-size:14px; margin:18px 0 8px; }
+  section{ background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:18px 22px; margin-bottom:16px; }
+  code, pre{ font-family:var(--mono); }
+  code{ background:var(--panel-2); border:1px solid var(--line); border-radius:3px; padding:1px 5px; color:var(--green); font-size:13px; }
+  pre{ background:#000; border:1px solid var(--line); border-radius:4px; padding:10px 12px; overflow-x:auto; font-size:13px; color:#c8f0c8; }
+  pre code{ background:none; border:none; padding:0; color:inherit; }
+  a{ color:var(--amber); }
+  .warn{ background:rgba(255,107,94,0.08); border:1px solid var(--red); border-radius:4px; padding:10px 14px; margin:10px 0; color:var(--text); }
+  .warn b{ color:var(--red); }
+  .tip{ background:rgba(95,217,122,0.08); border:1px solid var(--green); border-radius:4px; padding:10px 14px; margin:10px 0; }
+  .tip b{ color:var(--green); }
+  table{ width:100%; border-collapse:collapse; font-size:13px; margin:10px 0; }
+  th,td{ text-align:left; padding:6px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th{ color:var(--text-dim); font-weight:400; text-transform:uppercase; font-size:11px; }
+  ul, ol{ padding-left:22px; }
+  li{ margin-bottom:4px; }
+  nav{ display:flex; flex-wrap:wrap; gap:6px 14px; margin-bottom:22px; }
+  nav a{ color:var(--text-dim); text-decoration:none; font-size:13px; border:1px solid var(--line); border-radius:4px; padding:4px 10px; }
+  nav a:hover{ color:var(--amber); border-color:var(--amber-dim); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>FleetOS - гайд по надёжности и безопасности</h1>
+  <div class="sub">Админ- и security-функции моста - что это даёт и как включить. Базовая установка/дашборд - в <a href="fleetos_guide.html">основном гайде</a>, это его дополнение.</div>
+
+  <nav>
+    <a href="#security">1. Безопасность моста</a>
+    <a href="#health">2. Здоровье и метрики</a>
+    <a href="#backup">3. Резервное копирование флота</a>
+    <a href="#rollback">4. Откат ядра/приложения</a>
+    <a href="#configure">5. Массовая настройка флота</a>
+    <a href="#monitor">6. Разблокировка «зависшего» монитора</a>
+    <a href="#raytower">7. Защита Raytower</a>
+    <a href="#devs">8. Для тех, кто пишет свои приложения</a>
+  </nav>
+
+  <section id="security">
+    <h2>1. Безопасность моста</h2>
+
+    <h3>Ключ теперь можно не придумывать - генерируется сам</h3>
+    <p>Если запустить мост на адресе, отличном от <code>127.0.0.1</code> (например, через <code>FLEET_BRIDGE_HOST</code> для Radmin/LAN), и <code>FLEET_BRIDGE_KEY</code> не задан - мост САМ создаёт случайный ключ, сохраняет его в <code>windows/bridge_key.txt</code> (переиспользуется при перезапусках, не пересоздаётся каждый раз) и печатает прямо в консоль при старте:</p>
+    <pre><code>[bridge] no FLEET_BRIDGE_KEY set - generated one automatically (saved to
+[bridge] ...\windows\bridge_key.txt, reused on every future restart):
+[bridge]
+[bridge]     SPk55b-Lwv9cu1HzeHdfjqkt7i5pF14k
+[bridge]
+[bridge] paste it into: `install &lt;url&gt; &lt;key&gt;`, config.lua's apiKey field,
+[bridge] or the dashboard's "API key" field.</code></pre>
+    <p>Остаётся только скопировать этот ключ в команду <code>install</code>, <code>config.lua</code> или поле «API key» в дашборде. Задать свой собственный ключ через <code>FLEET_BRIDGE_KEY</code> по-прежнему можно - автогенерация включается только если вы этого не сделали.</p>
+
+    <h3>Ключ только для чтения</h3>
+    <p>Раньше был один ключ (<code>FLEET_BRIDGE_KEY</code>) - с ним можно было всё. Теперь можно завести ВТОРОЙ, слабее:</p>
+    <pre><code>set FLEET_BRIDGE_KEY=полный-ключ
+set FLEET_BRIDGE_READONLY_KEY=ключ-только-для-чтения
+py windows\bridge_server.py 8787</code></pre>
+    <p>С <code>FLEET_BRIDGE_READONLY_KEY</code> можно смотреть статус/файлы, но нельзя запускать команды, писать файлы или выполнять <code>/compute</code>. Выдавайте его тем, кому нужно только наблюдать за флотом.</p>
+
+    <h3>Выполнение compute-скриптов теперь выключено по умолчанию</h3>
+    <p><code>/compute/&lt;name&gt;</code> запускает произвольный Python/скомпилированный код на вашем ПК - это по сути удалённое выполнение кода. Теперь требует явного включения:</p>
+    <pre><code>set FLEET_ENABLE_COMPUTE=1</code></pre>
+    <div class="warn"><b>Включайте, только если реально используете</b> <code>windows/compute/*.py</code> (например, вычисления для Raytower) - без него сама фича Raytower и остальной флот продолжают работать как раньше.</div>
+
+    <h3>Опциональный TLS</h3>
+    <p>Если оба пути указаны, мост поднимется на <code>https://</code> вместо <code>http://</code>:</p>
+    <pre><code>set FLEET_TLS_CERT=path\to\cert.pem
+set FLEET_TLS_KEY=path\to\key.pem</code></pre>
+    <p>По умолчанию выключено - обычный <code>http</code> достаточно безопасен для localhost/доверенного VPN. Включайте, если мост смотрит куда-то ещё.</p>
+  </section>
+
+  <section id="health">
+    <h2>2. Здоровье и метрики</h2>
+    <p>Два новых эндпоинта для мониторинга флота автоматикой (или просто в браузере):</p>
+    <pre><code>curl http://127.0.0.1:8787/health
+curl http://127.0.0.1:8787/metrics   <span style="color:var(--text-dim)"># нужен ключ</span></code></pre>
+    <p><code>/health</code> - без ключа, для healthcheck-проб (сколько узлов известно, сколько из них отчитывались недавно). <code>/metrics</code> - счётчики: сколько команд поставлено в очередь, отчётов получено, ошибок, срабатываний rate-limit.</p>
+  </section>
+
+  <section id="backup">
+    <h2>3. Резервное копирование флота</h2>
+    <p>Раньше состояние флота (папки узлов, очереди команд) можно было бэкапить только вручную копируя <code>bridge_state.json</code>/<code>node_meta.json</code>. Теперь есть normal export/import:</p>
+    <pre><code>curl http://127.0.0.1:8787/admin/export -H "X-API-Key: полный-ключ" > backup.json
+
+curl -X POST http://127.0.0.1:8787/admin/import -H "X-API-Key: полный-ключ" -H "X-Fleet-Dashboard: 1" --data-binary @backup.json</code></pre>
+    <div class="warn"><b>Import заменяет состояние целиком</b>, не сливает с текущим - используйте для восстановления после сбоя ПК с мостом, не для повседневных операций.</div>
+  </section>
+
+  <section id="rollback">
+    <h2>4. Откат ядра/приложения</h2>
+    <p>«Update fleetos» теперь сам делает резервную копию перед обновлением (<code>fleetos.lua.bak</code>). Если новая версия ведёт себя плохо - откатите одной командой:</p>
+    <pre><code>curl -X POST http://127.0.0.1:8787/command -H "Content-Type: application/json" -H "X-Fleet-Dashboard: 1" -d "{\"node\":\"мой-узел\",\"type\":\"rollback_kernel\"}"</code></pre>
+    <p>Откатывает ровно на одну версию назад (не полная история) и перезагружает узел - то же самое, что уже было для приложений через <code>rollback</code>, теперь есть и для самого ядра.</p>
+  </section>
+
+  <section id="configure">
+    <h2>5. Массовая настройка флота</h2>
+    <p>Новая команда <code>configure</code> - меняет адрес моста и/или список автозапуска сразу на многих узлах одной командой, вместо ручного редактирования <code>config.lua</code> на каждом:</p>
+    <pre><code>curl -X POST http://127.0.0.1:8787/command -H "Content-Type: application/json" -H "X-Fleet-Dashboard: 1" \
+  -d "{\"node\":\"*\",\"type\":\"configure\",\"bridgeUrl\":\"http://новый-адрес:8787\",\"startup\":[\"clock\",\"fleetbridge\"]}"</code></pre>
+    <p><code>bridgeUrl</code>/<code>apiKey</code> и <code>startup</code> независимы - можно передать что-то одно. Новый список автозапуска применится со следующей перезагрузки узла.</p>
+  </section>
+
+  <section id="monitor">
+    <h2>6. Разблокировка «зависшего» монитора</h2>
+    <p>Если приложение захватило монитор (<code>fleetos.claimMonitor()</code>) и перестало его отпускать (не крашится, просто больше не перерисовывает) - раньше единственным выходом было убить его через терминал. Теперь можно снять захват удалённо, не трогая само приложение:</p>
+    <pre><code>curl -X POST http://127.0.0.1:8787/command -H "Content-Type: application/json" -H "X-Fleet-Dashboard: 1" -d "{\"node\":\"мой-узел\",\"type\":\"force_release_monitor\"}"</code></pre>
+    <div class="tip"><b>На практике до этого редко доходит</b> - приложение, которое зависло НАСТОЛЬКО, что не выполняет даже <code>os.pullEvent</code>/<code>os.sleep</code>, теперь само убивается сторожевым таймером ядра раньше, чем понадобится эта команда.</div>
+  </section>
+
+  <section id="raytower">
+    <h2>7. Защита Raytower</h2>
+    <p>Трафик Raytower по <code>rednet</code> раньше был совсем без защиты - любой игрок с модемом в радиусе действия мог подделать/переиграть пакеты (подменить решённую позицию, разослать фальшивый опрос). Теперь можно включить подпись:</p>
+    <pre><code>-- config.lua, ОДИНАКОВО на мастере и КАЖДОЙ вышке:
+raytowerSecret = "какой-то-общий-секрет",</code></pre>
+    <div class="warn"><b>Это не настоящий криптографический HMAC-SHA256</b> - у CraftOS-Lua нет битовых операций, чтобы дёшево собрать настоящий SHA-2. Реализация - keyed-MAC на основе FNV-1a плюс защита от replay по времени: останавливает случайного игрока без секрета, не защищает от целенаправленной криптоатаки. Подробности - <code>game/apps/raytower/_raytower_auth.lua</code>.</div>
+    <p>Без <code>raytowerSecret</code> всё работает как раньше (без подписи) - это опция, а не обязательное требование, обратная совместимость сохранена.</p>
+  </section>
+
+  <section id="devs">
+    <h2>8. Для тех, кто пишет свои приложения</h2>
+    <p>Появились: обмен данными между приложениями (<code>fleetos.setShared</code>/<code>getShared</code>/<code>publish</code>) и версия кода приложения по контрольной сумме (<code>fleetos.appVersion</code>). Полный список функций ядра и примеры - <code>game/apps/README.md</code>.</p>
+    <p>Полная спецификация HTTP API моста (все эндпоинты, форматы запросов/ответов) - <code>windows/openapi.yaml</code>.</p>
+  </section>
+</div>
+</body>
+</html>

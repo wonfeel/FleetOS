@@ -14,7 +14,7 @@ dofile("../test/cc_mocks.lua")
 
 -- hide the real config.lua so boot() doesn't auto-spawn shell/fleetbridge
 -- (both die almost instantly under mocks - noise this test doesn't need,
--- see PROJECT_NOTES.md/prior test comments on why `clock` is used instead)
+-- see prior test comments on why `clock` is used instead)
 local realFsExists = fs.exists
 fs.exists = function(path)
     if path == "config.lua" then return false end

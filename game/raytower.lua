@@ -1,5 +1,5 @@
 -- Everything in one file: triangulation math, master logic, slave logic.
--- The same file is uploaded to ALL computers (master and every tower),
+-- The same file is uploaded to ALL computers (master and every tower) -
 -- the role is chosen by the first argument at launch.
 --
 -- Usage:
@@ -10,6 +10,16 @@
 --   raytower master list
 --   raytower master solve
 --   raytower master clear
+--
+-- note: this standalone tool's rednet traffic is UNSIGNED, unlike
+-- apps/raytower/raytower_master.lua|raytower_slave.lua (which support a
+-- shared raytowerSecret via apps/raytower/_raytower_auth.lua). Deliberate -
+-- this file is intentionally a single, dependency-free file for one-off
+-- calibration sessions (see the header above), and pulling in the auth
+-- module would mean uploading two files instead of one. Only use this for
+-- a supervised calibration session, not as a long-running unattended master/
+-- slave - use the signed apps/raytower/*.lua versions under the kernel for
+-- that instead.
 
 local PROTOCOL = "raytower"
 

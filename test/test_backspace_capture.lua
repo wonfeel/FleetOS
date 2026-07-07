@@ -38,7 +38,7 @@ term.write("e")
 -- NOTE: uses io.write (not print/write) for its own status lines - print()
 -- is hooked by fleetos.lua and, being newline-terminated, would flush the
 -- very "in progress" shell line this test is trying to inspect, corrupting
--- the exact state under test (see PROJECT_NOTES.md's cursor-aware capture note).
+-- the exact state under test.
 local function status(msg) io.write(msg .. "\n") end
 
 local beforeBackspace = fleetos.getOutput()

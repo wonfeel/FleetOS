@@ -5,10 +5,35 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>FleetOS Remote Terminal</title>
 <style>
+  /* Real CC:Tweaked terminal font, built from the game's own bitmap glyph
+     atlas (termFont.png, 16x16 grid of 6x9px glyphs - see
+     reference/ComputerCraft-1.79/.../FixedWidthFontRenderer.java) - every
+     lit pixel converted to a unit square outline via fontTools, so this is
+     a faithful vector reproduction of the actual in-game font, not an
+     approximation.
+     Cyrillic (А-я, Ё/ё) is a project addition on top of that - the real
+     game font has never included it (ComputerCraft/CC:Tweaked is English-
+     only). Visually-identical letters reuse the exact real glyph shape
+     (А=A, а=a, etc); the rest are hand-drawn in the same 6x9 pixel style/
+     baseline. Without this, every Cyrillic character in the (mostly
+     Russian) UI fell back to a different font mid-string, which is what
+     caused the visibly uneven per-character spacing reported before this
+     was added - see windows/fonts/build_font_cyrillic.py for how the font
+     itself was built.
+     Embedded as a data URI (not a separate file request) - bridge_server.py
+     only serves an allowlisted set of routes, no generic static-file
+     handler, and ~8KB is small enough this is simpler than adding one. */
+  @font-face {
+    font-family: "CC Terminal";
+    src: url(data:font/woff;base64,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) format("woff");
+    font-weight: normal; font-style: normal; font-display: swap;
+  }
   :root{
     --bg: #0c0f0d; --panel: #12160f; --panel-2: #171c14; --line: #2a3324;
     --amber: #ffb300; --amber-dim: #a87400; --text: #d8dccb; --text-dim: #8a9280;
-    --green: #5fd97a; --red: #ff6b5e; --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    --green: #5fd97a; --red: #ff6b5e;
+    --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    --cc-mono: "CC Terminal", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
   }
   *{box-sizing:border-box;}
   body{ background:var(--bg); color:var(--text); font-family:var(--mono); font-size:14px; margin:0; padding:20px; }
@@ -29,6 +54,7 @@
   button:hover{ background:var(--amber); }
   button.secondary{ background:var(--panel-2); color:var(--text); border:1px solid var(--line); }
   button.secondary:hover{ color:var(--amber); border-color:var(--amber-dim); background:var(--panel-2); }
+  button.secondary.active{ color:var(--amber); border-color:var(--amber); }
   .row{ display:flex; gap:8px; align-items:center; margin-bottom:8px; flex-wrap:wrap; }
   .row label{ color:var(--text-dim); font-size:12px; }
   .status-running{ color:var(--green); }
@@ -38,38 +64,133 @@
   .pill.ok{ background:rgba(95,217,122,0.15); color:var(--green); }
   .pill.stale{ background:rgba(255,107,94,0.15); color:var(--red); }
 
+  .topbar{ display:flex; justify-content:space-between; align-items:flex-start; gap:12px; }
+  .lang-switch{ display:flex; gap:4px; flex-shrink:0; }
+  .lang-switch button{ padding:3px 10px; font-size:12px; }
+
   #termOutput{
     background:#000; color:#c8f0c8; font-size:13px; line-height:1.4;
     height:340px; overflow-y:auto; padding:10px; border-radius:4px; white-space:pre-wrap;
-    border:1px solid var(--line);
+    border:1px solid var(--line); font-family:var(--cc-mono);
+    -webkit-font-smoothing:none; font-smooth:never; text-rendering:optimizeSpeed;
   }
   #termInputRow{ display:flex; gap:8px; margin-top:10px; }
-  #termInput{ flex:1; width:auto; }
-  #termInput::before{ content:"> "; }
+  #termInput{ flex:1; width:auto; font-family:var(--cc-mono); }
+
+  .monitor-scroll{ overflow:hidden; }
+  .monitor-frame{
+    display:inline-block; background:#0d0d0d; border:8px solid #262626; border-radius:8px;
+    padding:14px; box-shadow:inset 0 0 14px rgba(0,0,0,0.7), 0 2px 10px rgba(0,0,0,0.4);
+  }
+  .monitor-grid-box{ display:inline-block; overflow:hidden; }
+  .monitor-grid{
+    display:inline-block; font-family:"CC Terminal", 'Consolas','Courier New',monospace; font-size:22px; line-height:1.15;
+    cursor:pointer; transform-origin:top left;
+    /* the real font's edges are hard right angles (built from square
+       pixels) - anti-aliasing/subpixel smoothing blurs that back into
+       looking like a regular font, so turn it off here specifically */
+    -webkit-font-smoothing:none; font-smooth:never; text-rendering:optimizeSpeed;
+  }
+  .monitor-grid:hover{ filter:brightness(1.08); }
+  .monitor-row{ white-space:pre; }
 
   .editor{ display:none; }
   .editor.open{ display:block; }
   .editor textarea{ width:100%; height:220px; font-size:12px; }
   .editor .row{ margin-top:8px; }
+
+  #explorerBreadcrumb button{ padding:3px 8px; }
+  #explorerBreadcrumb button:first-child{ font-weight:700; }
+  #explorerTable a{ color:var(--text); text-decoration:none; cursor:pointer; }
+  #explorerTable a:hover{ color:var(--amber); text-decoration:underline; }
+  #explorerTable tr.busy{ opacity:0.5; pointer-events:none; }
+  .explorer-rename-btn{ opacity:0.35; font-size:12px; cursor:pointer; text-decoration:none !important; }
+  .explorer-rename-btn:hover{ opacity:1; }
+  #fileEditorBox textarea{ width:100%; height:220px; font-size:12px; }
+  #explorerDropZone{ border:1px dashed transparent; border-radius:4px; padding:2px; transition:border-color .1s; }
+  #explorerDropZone.dragover{ border-color:var(--amber); background:rgba(255,179,0,0.06); }
+  #computeOutput_wrap table{ margin-top:4px; }
+  #computeOutput_wrap td{ vertical-align:top; }
+  .raw-json-toggle{ color:var(--text-dim); font-size:11px; cursor:pointer; }
+  .raw-json-toggle:hover{ color:var(--amber); }
+
+  /* Fleet table: folder-group header rows + collapse toggle */
+  tbody.folder-group{ background:var(--panel-2); }
+  tbody.folder-group tr.folder-header td{ color:var(--amber); text-transform:uppercase; font-size:12px; font-weight:700; cursor:pointer; padding:10px 8px; }
+  tbody.folder-group tr.folder-header td:first-child{ border-left:4px solid var(--folder-color, var(--amber-dim)); }
+  tbody.folder-group tr:not(.folder-header) td:first-child{ border-left:4px solid var(--folder-color, transparent); }
+  tbody.folder-group.collapsed tr:not(.folder-header){ display:none; }
+  tbody.folder-group + tbody.folder-group tr.folder-header td{ padding-top:16px; }
+  .folder-caret{ display:inline-block; width:1em; }
+  #nodesTable select{ font-size:12px; padding:3px 4px; }
+  #nodesTable tr:not(.folder-header):hover td{ background:rgba(255,179,0,0.05); }
+  .legend-swatch{ display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:4px; vertical-align:middle; }
+
+  /*: this dashboard was designed mouse/desktop-first with no adaptation
+     for narrow/touch screens at all (no @media rules anywhere before this)
+     - every table overflowed the viewport instead of scrolling, and
+     buttons/inputs sized for a mouse cursor are too small/close together
+     to reliably tap. Scoped to <=640px (phones; tablets at ~768px+ already
+     work fine at this layout's natural width) so desktop is untouched. */
+  @media (max-width: 640px){
+    body{ padding:10px 10px 40px; font-size:15px; }
+    .wrap{ max-width:100%; }
+    section{ padding:12px; }
+    .topbar{ flex-direction:column; align-items:stretch; gap:8px; }
+    .lang-switch{ align-self:flex-end; }
+    h1{ font-size:18px; }
+    /* Common responsive-table technique: a <table> given display:block
+       establishes its own block box that can scroll horizontally as a
+       whole, without needing an extra wrapper <div> around every table in
+       the markup (which JS builds/rebuilds these rows into via
+       document.createElement - not something to restructure just for this). */
+    table{ display:block; overflow-x:auto; white-space:nowrap; -webkit-overflow-scrolling:touch; }
+    thead, tbody, tr{ display:table; width:100%; table-layout:auto; }
+    /* Bigger tap targets - a mouse-era 5px/8px button padding is too small
+       to reliably hit with a fingertip (Apple/Google guidance is ~44px). */
+    button{ padding:8px 12px; min-height:40px; }
+    #explorerBreadcrumb button{ min-height:32px; padding:6px 10px; }
+    input, select, textarea{ font-size:16px; } /* also stops iOS Safari auto-zooming into the field on focus */
+    input, select{ width:100%; max-width:100%; }
+    input[style*="width"]{ width:100% !important; max-width:100% !important; }
+    /* a <select> sizes itself to its widest <option> text by default
+       (e.g. explorerSource's node-path options) regardless of any width
+       set on it - min-width:0 lets the width:100% above actually shrink it
+       instead of only ever growing to fit content, same underlying reason
+       flex/grid items need min-width:0 to shrink below their content size. */
+    select{ min-width:0; }
+    .row{ align-items:stretch; }
+    .row label{ flex-basis:100%; }
+    #termInputRow{ flex-wrap:wrap; }
+    #termInput{ flex-basis:100%; }
+  }
 </style>
 </head>
 <body>
 <div class="wrap">
-  <h1>FleetOS Remote Terminal</h1>
-  <div class="sub">bridge_server.py &middot; <span id="pingPill" class="pill stale">no report yet</span></div>
+  <div class="topbar">
+    <div>
+      <h1 data-i18n="page_h1">FleetOS Remote Terminal</h1>
+      <div class="sub">bridge_server.py &middot; <span id="pingPill" class="pill stale">no report yet</span></div>
+    </div>
+    <div class="lang-switch">
+      <button class="secondary lang-btn" data-lang="en" onclick="applyLang('en')">EN</button>
+      <button class="secondary lang-btn" data-lang="ru" onclick="applyLang('ru')">RU</button>
+    </div>
+  </div>
 
   <section>
-    <h2>Bridge address</h2>
+    <h2 data-i18n="bridge_title">Bridge address</h2>
     <div class="row">
-      <label>bridge_server.py is running at</label>
+      <label data-i18n="bridge_running_at">bridge_server.py is running at</label>
       <input id="bridgeUrl" style="width:260px" value="http://127.0.0.1:8787">
     </div>
     <div class="row">
-      <label>API key (only if the bridge was started with FLEET_BRIDGE_KEY)</label>
-      <input id="bridgeKey" type="password" style="width:260px" placeholder="leave blank if none">
-      <button onclick="saveBridgeUrl()">Save &amp; reload</button>
+      <label data-i18n="label_api_key">API key (only if the bridge was started with FLEET_BRIDGE_KEY)</label>
+      <input id="bridgeKey" type="password" style="width:260px" placeholder="leave blank if none" data-i18n-ph="ph_api_key">
+      <button onclick="saveBridgeUrl()" data-i18n="btn_save_reload">Save &amp; reload</button>
     </div>
-    <div class="sub" style="margin:0">
+    <div class="sub" style="margin:0" data-i18n="bridge_desc">
       This page is a static file and can be hosted anywhere (e.g. GitHub Pages), but it always
       talks to bridge_server.py running on your own PC. Default is right if you're viewing this
       on the same PC running the bridge. Browsers block plain-http requests from an https page to
@@ -80,91 +201,136 @@
   </section>
 
   <section>
-    <h2>Fleet - pick a computer</h2>
-    <div class="sub" style="margin:0 0 8px">
+    <h2 data-i18n="fleet_title">Fleet - pick a computer</h2>
+    <div class="sub" style="margin:0 0 8px" data-i18n-html="fleet_desc">
       Every computer runs its own <code>fleetbridge</code> and shows up here once it's polled at
-      least once - no master, they're all equal. Terminal and Remote files below act on whichever
-      one is selected.
+      least once - no master, they're all equal. Click a row to select it - Terminal and Explorer
+      below act on whichever one is selected.
     </div>
     <div class="row">
-      <label>selected computer</label>
-      <select id="nodeSelect" style="width:200px" onchange="selectNode(this.value)">
-        <option value="">&mdash; select &mdash;</option>
-      </select>
-      <button class="secondary" onclick="updateFleetos(selectedNode)">Update fleetos</button>
-      <button class="secondary" onclick="updateFleetos('*')">Update fleetos (all)</button>
+      <span id="selectedNodeLabel" class="sub"></span>
+      <button class="secondary" onclick="updateFleetos(this)" data-i18n="btn_update_fleetos">Update fleetos</button>
+      <input id="renameNodeInput" style="width:140px" placeholder="new_id" data-i18n-ph="ph_new_id">
+      <button class="secondary" onclick="renameNode(this)" data-i18n="btn_rename">Rename</button>
     </div>
-    <div class="sub" id="updateStatus" style="margin:0 0 8px"></div>
-    <div class="row">
-      <label>rename selected computer to</label>
-      <input id="renameNodeInput" style="width:160px" placeholder="new_id">
-      <button class="secondary" onclick="renameNode()">Rename</button>
-    </div>
+    <div class="sub" id="updateStatus" style="margin:0 0 4px"></div>
     <div class="sub" id="renameStatus" style="margin:0 0 8px"></div>
+
+    <div class="row" id="fleetBulkBar" style="display:none">
+      <span id="fleetBulkCount" class="sub"></span>
+      <select id="fleetBulkFolder"></select>
+      <button class="secondary" onclick="bulkAssignFolder()" data-i18n="btn_move_to_folder">Move to folder</button>
+      <input id="fleetBulkAppName" style="width:120px" placeholder="app name" data-i18n-ph="ph_bulk_app_name">
+      <button class="secondary" onclick="bulkRunApp(this)" data-i18n="btn_run">Run</button>
+      <button class="secondary" onclick="bulkKillApp(this)" data-i18n="btn_kill">Kill</button>
+    </div>
+
     <table id="nodesTable">
-      <tr><th>Node</th><th>Role</th><th>Apps</th><th>Last report</th></tr>
+      <tr>
+        <th><input type="checkbox" id="fleetSelectAll" onclick="toggleSelectAll(this)"></th>
+        <th data-i18n="col_node">Node</th><th data-i18n="col_role">Role</th><th data-i18n="col_pos">Position</th>
+        <th data-i18n="col_apps">Apps</th><th data-i18n="col_last_report">Last report</th><th data-i18n="col_folder">Folder</th>
+      </tr>
     </table>
   </section>
 
   <section>
-    <h2>Terminal <span id="termTarget" class="sub"></span></h2>
-    <div id="termOutput"></div>
-    <div id="termInputRow">
-      <input id="termInput" style="flex:1" placeholder="type a command, e.g. 'ls' or 'fleetos'" autofocus>
-      <button onclick="sendTerminalLine()">Send</button>
+    <div class="row" style="margin-bottom:14px">
+      <button class="secondary active" id="screenTabTerminal" onclick="selectScreenTab('terminal')" data-i18n="terminal_title">Terminal</button>
+      <button class="secondary" id="screenTabMonitor" onclick="selectScreenTab('monitor')" data-i18n="monitor_title">Monitor</button>
+      <span id="screenTarget" class="sub" style="margin:0"></span>
     </div>
-    <div class="sub" style="margin:8px 0 0">
-      Runs on the selected computer as if typed at its real shell prompt (via <code>shell.run</code>).
-      A program that never exits (like re-running <code>fleetos</code>) will freeze this terminal
-      until it's stopped some other way - same as it would in-game.
+
+    <div id="terminalPane">
+      <div id="termOutput"></div>
+      <div id="termInputRow">
+        <input id="termInput" style="flex:1" placeholder="type a command, e.g. 'ls' or 'fleetos'" data-i18n-ph="ph_terminal" autofocus>
+        <button onclick="sendTerminalLine()" data-i18n="btn_send">Send</button>
+      </div>
+      <div class="sub" style="margin:8px 0 0" data-i18n-html="terminal_desc">
+        Runs on the selected computer as if typed at its real shell prompt (via <code>shell.run</code>).
+        A program that never exits (like re-running <code>fleetos</code>) will freeze this terminal
+        until it's stopped some other way - same as it would in-game.
+      </div>
+    </div>
+
+    <div id="monitorPane" style="display:none">
+      <div class="sub" style="margin:0 0 8px" data-i18n="monitor_desc">
+        Emulates whatever's actually drawn on this computer's attached monitor peripheral, if any -
+        same colors, same content, real CC:Tweaked palette.
+      </div>
+      <div id="monitorScroll" class="monitor-scroll">
+        <div id="monitorFrame" class="monitor-frame" style="display:none">
+          <div id="monitorGridBox" class="monitor-grid-box">
+            <div id="monitorGrid" class="monitor-grid"></div>
+          </div>
+        </div>
+      </div>
+      <div class="sub" id="monitorStatus"></div>
     </div>
   </section>
 
   <section>
-    <h2>Remote files <span id="filesTarget" class="sub"></span></h2>
-    <div class="row">
-      <label>path</label>
-      <input id="remotePath" style="width:200px" value="config.lua">
-      <button onclick="readRemoteFile()">Read</button>
-      <button onclick="writeRemoteFile()">Write</button>
+    <h2><span data-i18n="explorer_title">Explorer</span> <span id="filesTarget" class="sub"></span></h2>
+    <div class="sub" style="margin:0 0 8px" data-i18n="explorer_desc">
+      Browse, open, edit, create and delete files/folders - just like a normal file explorer.
     </div>
-    <textarea id="remoteFileContent" style="width:100%;height:160px;font-size:12px"></textarea>
-    <div class="sub" id="remoteFileStatus"></div>
-  </section>
-
-  <section>
-    <h2>Create a new app</h2>
-    <div class="sub" style="margin:0 0 8px">Writes a new file on THIS PC only - Deploy it below once created.</div>
     <div class="row">
-      <label>name</label>
-      <input id="newAppName" style="width:160px" placeholder="my_app">
-      <label>group</label>
-      <select id="newAppGroup">
-        <option value="common">common</option>
-        <option value="raytower">raytower</option>
-        <option value="other">other (flat apps/)</option>
+      <label data-i18n="label_browse">Browse</label>
+      <select id="explorerSource" onchange="explorerSourceChanged()">
+        <option value="node" data-i18n="opt_source_node">Selected computer</option>
+        <option value="pc_game" data-i18n="opt_source_pc_game">This PC - game/ (deployable templates)</option>
+        <option value="pc_compute" data-i18n="opt_source_pc_compute">This PC - compute/ (Python/C++ scripts)</option>
       </select>
-      <button onclick="createApp()">Create</button>
     </div>
-    <textarea id="newAppContent" style="width:100%;height:140px;font-size:12px" placeholder="-- new app code, e.g.:&#10;print('hello from my_app')"></textarea>
-    <div class="sub" id="newAppStatus"></div>
+    <div id="explorerDropZone" ondragover="explorerOnDragOver(event)" ondragleave="explorerOnDragLeave(event)" ondrop="explorerOnDrop(event)">
+      <div class="row" id="explorerBreadcrumb"></div>
+      <div class="row">
+        <button class="secondary" onclick="explorerRefresh()" data-i18n="btn_refresh">Refresh</button>
+        <input id="newFolderName" style="width:150px" placeholder="new folder name" data-i18n-ph="ph_new_folder">
+        <button class="secondary" onclick="explorerMkdir()" data-i18n="btn_new_folder">New folder</button>
+        <input id="newFileName" style="width:150px" placeholder="new file name" data-i18n-ph="ph_new_file">
+        <button class="secondary" onclick="explorerNewFile()" data-i18n="btn_new_file">New file</button>
+      </div>
+      <table id="explorerTable">
+        <tr><th data-i18n="col_name">Name</th><th data-i18n="col_size">Size</th><th></th></tr>
+      </table>
+      <div class="sub" data-i18n="explorer_drop_hint">Drag & drop files or whole folders here to upload them.</div>
+    </div>
+    <div class="sub" id="explorerStatus"></div>
+
+    <div id="fileEditorBox" style="display:none;margin-top:14px">
+      <div class="row">
+        <label data-i18n="editing_label">Editing:</label> <code id="explorerEditingPath"></code>
+        <button class="secondary" onclick="explorerCloseEditor()" data-i18n="btn_close">Close</button>
+      </div>
+      <textarea id="remoteFileContent"></textarea>
+      <div class="row">
+        <button onclick="explorerSaveFile()" data-i18n="btn_save">Save</button>
+        <span id="remoteFileStatus" class="sub"></span>
+      </div>
+      <div class="row" id="explorerAppActionsRow" style="display:none">
+        <label data-i18n="label_target">target</label>
+        <select id="explorerAppTarget" class="node-target-select"></select>
+        <button class="secondary" onclick="explorerAppRun(this)" data-i18n="btn_run">Run</button>
+        <button class="secondary" onclick="explorerAppKill(this)" data-i18n="btn_kill">Kill</button>
+        <button onclick="explorerAppDeploy(this)" data-i18n="btn_deploy">Deploy</button>
+        <span id="explorerAppActionsStatus" class="sub"></span>
+      </div>
+    </div>
   </section>
 
   <section>
-    <h2>Local apps (edit on this PC, then deploy)</h2>
-    <div class="sub" style="margin:0 0 8px">Target defaults to the selected computer above, or <code>*</code> for every known node.</div>
-    <table id="appsTable">
-      <tr><th>App</th><th>Target</th><th colspan="4"></th></tr>
+    <h2 data-i18n="compute_scripts_title">Compute scripts (edit / test-run on this PC)</h2>
+    <div class="sub" style="margin:0 0 8px" data-i18n-html="compute_scripts_desc">
+      New apps and compute scripts are created by dragging files into the Explorer above (source
+      "This PC - game/" or "This PC - compute/") - see <code>windows/compute/triangulation.py</code>
+      for a real example of a compute script's stdin/stdout contract. Edit or test-run an existing
+      one below.
+    </div>
+    <table id="computeTable">
+      <tr><th data-i18n="col_script">Script</th><th colspan="2"></th></tr>
     </table>
-  </section>
-
-  <section>
-    <h2>Macros (one click = several commands)</h2>
-    <div class="row">
-      <label>target</label>
-      <select id="macroTarget" class="node-target-select"></select>
-    </div>
-    <div class="row" id="macrosRow"></div>
   </section>
 </div>
 
@@ -186,40 +352,337 @@ function saveBridgeUrl() {
   window.location.reload();
 }
 
+// ==== i18n =================================================================
+// A tiny attribute-driven translator, not a library: data-i18n sets
+// textContent, data-i18n-ph sets the placeholder attribute, data-i18n-html
+// sets innerHTML (only ever fed from THIS dictionary below - fixed strings
+// written by us, never node/user-controlled data, so this is not an XSS
+// vector the way piping node output through innerHTML would be - see
+// appsSummaryFragment() further down for how THAT stays textContent-only).
+const I18N = {
+  en: {
+    page_h1: 'FleetOS Remote Terminal',
+    ping_no_report: 'no report yet',
+    ping_no_computers: 'no computers seen yet',
+    ping_select_below: 'select a computer below',
+    bridge_title: 'Bridge address',
+    bridge_running_at: 'bridge_server.py is running at',
+    label_api_key: 'API key (only if the bridge was started with FLEET_BRIDGE_KEY)',
+    ph_api_key: 'leave blank if none',
+    btn_save_reload: 'Save & reload',
+    bridge_desc: `This page is a static file and can be hosted anywhere (e.g. GitHub Pages), but it always
+      talks to bridge_server.py running on your own PC. Default is right if you're viewing this
+      on the same PC running the bridge. Browsers block plain-http requests from an https page to
+      anything other than 127.0.0.1/localhost, so a remote address (e.g. a Radmin IP) only works
+      if you open this file locally (or allow insecure content for this site in your browser).
+      The API key is stored in this browser's local storage, same as the bridge address.`,
+    fleet_title: 'Fleet - pick a computer',
+    fleet_desc: `Every computer runs its own <code>fleetbridge</code> and shows up here once it's polled at
+      least once - no master, they're all equal. Terminal and Explorer below act on whichever
+      one is selected.`,
+    btn_update_fleetos: 'Update fleetos',
+    label_rename_to: 'rename selected computer to',
+    ph_new_id: 'new_id',
+    btn_rename: 'Rename',
+    col_node: 'Node', col_role: 'Role', col_apps: 'Apps', col_last_report: 'Last report',
+    col_pos: 'Position', col_folder: 'Folder',
+    pos_unknown: '- unknown -',
+    opt_no_folder: '(no folder)',
+    opt_new_folder: '+ new folder...',
+    prompt_new_folder_name: 'New folder name:',
+    bulk_selected_count: '{n} selected:',
+    btn_move_to_folder: 'Move to folder',
+    ph_bulk_app_name: 'app name',
+    folder_ungroup: 'Ungroup',
+    folder_rename: 'Rename',
+    prompt_rename_folder: 'Rename folder "{folder}" to:',
+    terminal_title: 'Terminal',
+    ph_terminal: "type a command, e.g. 'ls' or 'fleetos'",
+    btn_send: 'Send',
+    terminal_desc: `Runs on the selected computer as if typed at its real shell prompt (via <code>shell.run</code>).
+      A program that never exits (like re-running <code>fleetos</code>) will freeze this terminal
+      until it's stopped some other way - same as it would in-game.`,
+    monitor_title: 'Monitor',
+    monitor_desc: "Emulates whatever's actually drawn on this computer's attached monitor peripheral, if any - same colors, same content, real CC:Tweaked palette.",
+    msg_no_monitor: 'no monitor attached to this computer (or nothing has been drawn to it yet)',
+    explorer_title: 'Explorer',
+    explorer_desc: 'Browse, open, edit, create and delete files/folders - just like a normal file explorer.',
+    label_browse: 'Browse',
+    opt_source_node: 'Selected computer',
+    opt_source_pc_game: 'This PC - game/ (deployable templates)',
+    opt_source_pc_compute: 'This PC - compute/ (Python/C++ scripts)',
+    explorer_drop_hint: 'Drag & drop files or whole folders here to upload them.',
+    btn_refresh: 'Refresh',
+    ph_new_folder: 'new folder name', btn_new_folder: 'New folder',
+    ph_new_file: 'new file name', btn_new_file: 'New file',
+    col_name: 'Name', col_size: 'Size',
+    btn_open: 'Open', btn_edit: 'Edit', btn_delete: 'Delete',
+    btn_rename_item: 'Rename', btn_run_file: 'Run', btn_download: 'Download',
+    msg_ran_file: 'ran {path}',
+    editing_label: 'Editing:', btn_close: 'Close', btn_save: 'Save',
+    msg_folder_exists: 'folder already existed - nothing changed',
+    msg_uploading: 'uploading {done}/{total}...',
+    msg_upload_done: 'uploaded {n} item(s)',
+    msg_unsaved_confirm: 'Discard unsaved changes to {path}?',
+    btn_raw_json: 'raw JSON',
+    btn_kill: 'Kill', btn_deploy: 'Deploy', btn_save_to_pc: 'Save to PC',
+    col_script: 'Script',
+    compute_scripts_title: 'Compute scripts (edit / test-run on this PC)',
+    compute_scripts_desc: `New apps and compute scripts are created by dragging files into the Explorer above (source
+      "This PC - game/" or "This PC - compute/") - see <code>windows/compute/triangulation.py</code>
+      for a real example of a compute script's stdin/stdout contract. Edit or test-run an existing
+      one below.`,
+    test_input_label: "Test input (JSON body sent to the script's stdin):",
+    btn_run: 'Run', btn_run_with_input: 'Run with this input',
+    label_target: 'target',
+    msg_select_computer_first: 'Select a computer first (Fleet section above)',
+    msg_select_computer_first_short: 'select a computer first',
+    msg_no_response: 'no response (is fleetbridge.lua running on {node}?)',
+    msg_error_prefix: 'error: ',
+    msg_name_required: 'name required',
+    msg_reading: 'reading...', msg_writing: 'writing...', msg_loading: 'loading...',
+    msg_enter_new_id: 'enter a new id first',
+    msg_saved_at: 'saved to PC {time}',
+    msg_saved_py_at: 'saved {time}',
+    msg_ran_at: 'ran {time}',
+    msg_deployed_to: 'deployed to {node}',
+    msg_invalid_json: 'invalid JSON input: {err}',
+    msg_read_bytes: 'read {n} bytes from {path} on {node}',
+    msg_wrote_bytes: 'wrote {n} bytes to {path}',
+    msg_fetching_reboot: 'fetching fleetos.lua on {node} and rebooting...',
+    msg_every_computer: 'every computer',
+    msg_no_response_rebooting: 'no response yet - it may already be rebooting (check "last report" below in a moment)',
+    msg_update_all_ack: 'at least one computer acked and is rebooting - "*" only shows one result at a time, check each node\'s "last report" age below to confirm they all restarted',
+    msg_renaming: 'renaming {old} -> {new} and rebooting...',
+    msg_no_response_rebooting_table: 'no response yet - it may already be rebooting (check the table below in a moment)',
+    msg_renamed_ok: '{old} is now {new} and rebooting - it will reappear below under its new id once fleetbridge starts polling again',
+    msg_items_count: '{n} item(s)',
+    confirm_delete_file: 'Delete file "{path}"?',
+    confirm_delete_dir: 'Delete folder "{path}" and everything inside it?',
+    root_label: '/ (root)',
+  },
+  ru: {
+    page_h1: 'FleetOS - удалённый терминал',
+    ping_no_report: 'ещё нет отчёта',
+    ping_no_computers: 'компьютеры пока не найдены',
+    ping_select_below: 'выберите компьютер ниже',
+    bridge_title: 'Адрес моста',
+    bridge_running_at: 'bridge_server.py запущен по адресу',
+    label_api_key: 'Ключ API (только если мост запущен с FLEET_BRIDGE_KEY)',
+    ph_api_key: 'оставьте пустым, если ключа нет',
+    btn_save_reload: 'Сохранить и перезагрузить',
+    bridge_desc: `Эта страница - статический файл и может размещаться где угодно (например, на GitHub
+      Pages), но всегда обращается к bridge_server.py, запущенному на вашем ПК. Значение по
+      умолчанию верно, если вы открываете эту страницу на том же ПК, где работает мост. Браузеры
+      блокируют обычные http-запросы со страниц https ко всему, кроме 127.0.0.1/localhost,
+      поэтому удалённый адрес (например, IP из Radmin) работает только если открыть этот файл
+      локально (или разрешить небезопасный контент для этого сайта в браузере). Ключ API хранится
+      в локальном хранилище браузера, как и адрес моста.`,
+    fleet_title: 'Флот - выбор компьютера',
+    fleet_desc: `Каждый компьютер запускает свой <code>fleetbridge</code> и появляется здесь после первого
+      опроса - единого главного нет, все компьютеры равноправны. Терминал и Проводник ниже
+      работают с тем компьютером, который выбран.`,
+    btn_update_fleetos: 'Обновить fleetos',
+    label_rename_to: 'переименовать выбранный компьютер в',
+    ph_new_id: 'новый_id',
+    btn_rename: 'Переименовать',
+    col_node: 'Компьютер', col_role: 'Роль', col_apps: 'Приложения', col_last_report: 'Последний отчёт',
+    col_pos: 'Позиция', col_folder: 'Папка',
+    pos_unknown: '- неизвестно -',
+    opt_no_folder: '(без папки)',
+    opt_new_folder: '+ новая папка...',
+    prompt_new_folder_name: 'Имя новой папки:',
+    bulk_selected_count: 'выбрано: {n}',
+    btn_move_to_folder: 'Переместить в папку',
+    ph_bulk_app_name: 'имя приложения',
+    folder_ungroup: 'Разгруппировать',
+    folder_rename: 'Переименовать',
+    prompt_rename_folder: 'Переименовать папку «{folder}» в:',
+    terminal_title: 'Терминал',
+    ph_terminal: "введите команду, например 'ls' или 'fleetos'",
+    btn_send: 'Отправить',
+    terminal_desc: `Выполняется на выбранном компьютере так, будто введено в его настоящей консоли
+      (через <code>shell.run</code>). Программа, которая никогда не завершается (например,
+      повторный запуск <code>fleetos</code>), заморозит этот терминал, пока её не остановят
+      другим способом - так же, как и в самой игре.`,
+    monitor_title: 'Монитор',
+    monitor_desc: 'Эмулирует то, что реально выведено на подключённый к этому компьютеру монитор (если он есть) - те же цвета, то же содержимое, настоящая палитра CC:Tweaked.',
+    msg_no_monitor: 'к этому компьютеру не подключён монитор (или на него ещё ничего не выводилось)',
+    explorer_title: 'Проводник',
+    explorer_desc: 'Просматривайте, открывайте, редактируйте, создавайте и удаляйте файлы и папки - как в обычном проводнике.',
+    label_browse: 'Источник',
+    opt_source_node: 'Выбранный компьютер',
+    opt_source_pc_game: 'Этот ПК - game/ (шаблоны для деплоя)',
+    opt_source_pc_compute: 'Этот ПК - compute/ (Python/C++ скрипты)',
+    explorer_drop_hint: 'Перетащите файлы или целые папки сюда, чтобы загрузить их.',
+    btn_refresh: 'Обновить',
+    ph_new_folder: 'имя новой папки', btn_new_folder: 'Новая папка',
+    ph_new_file: 'имя нового файла', btn_new_file: 'Новый файл',
+    col_name: 'Имя', col_size: 'Размер',
+    btn_open: 'Открыть', btn_edit: 'Изменить', btn_delete: 'Удалить',
+    btn_rename_item: 'Переименовать', btn_run_file: 'Запустить', btn_download: 'Скачать',
+    msg_ran_file: 'запущено: {path}',
+    editing_label: 'Редактирование:', btn_close: 'Закрыть', btn_save: 'Сохранить',
+    msg_folder_exists: 'папка уже существовала - ничего не изменилось',
+    msg_uploading: 'загрузка {done}/{total}...',
+    msg_upload_done: 'загружено объектов: {n}',
+    msg_unsaved_confirm: 'Отменить несохранённые изменения в {path}?',
+    btn_raw_json: 'исходный JSON',
+    btn_kill: 'Остановить', btn_deploy: 'Деплой', btn_save_to_pc: 'Сохранить на ПК',
+    col_script: 'Скрипт',
+    compute_scripts_title: 'Compute-скрипты (редактирование / тестовый запуск на этом ПК)',
+    compute_scripts_desc: `Новые приложения и compute-скрипты создаются перетаскиванием файлов в Проводник выше
+      (источник «Этот ПК - game/» или «Этот ПК - compute/») - см. <code>windows/compute/triangulation.py</code>
+      как реальный пример stdin/stdout-контракта compute-скрипта. Ниже можно отредактировать или
+      тестово запустить уже существующий.`,
+    test_input_label: 'Тестовый ввод (JSON, отправляется в stdin скрипта):',
+    btn_run: 'Запустить', btn_run_with_input: 'Запустить с этим вводом',
+    label_target: 'цель',
+    msg_select_computer_first: 'Сначала выберите компьютер (раздел «Флот» выше)',
+    msg_select_computer_first_short: 'сначала выберите компьютер',
+    msg_no_response: 'нет ответа (запущен ли fleetbridge.lua на {node}?)',
+    msg_error_prefix: 'ошибка: ',
+    msg_name_required: 'укажите имя',
+    msg_reading: 'чтение...', msg_writing: 'запись...', msg_loading: 'загрузка...',
+    msg_enter_new_id: 'сначала введите новый id',
+    msg_saved_at: 'сохранено на ПК {time}',
+    msg_saved_py_at: 'сохранено {time}',
+    msg_ran_at: 'выполнено {time}',
+    msg_deployed_to: 'задеплоено на {node}',
+    msg_invalid_json: 'некорректный JSON: {err}',
+    msg_read_bytes: 'прочитано {n} байт из {path} на {node}',
+    msg_wrote_bytes: 'записано {n} байт в {path}',
+    msg_fetching_reboot: 'загрузка fleetos.lua на {node} и перезагрузка...',
+    msg_every_computer: 'все компьютеры',
+    msg_no_response_rebooting: 'пока нет ответа - возможно, уже перезагружается (проверьте «последний отчёт» ниже через момент)',
+    msg_update_all_ack: 'как минимум один компьютер подтвердил и перезагружается - «*» показывает только один результат за раз, проверьте возраст «последнего отчёта» у каждого узла ниже, чтобы убедиться, что все перезапустились',
+    msg_renaming: 'переименование {old} -> {new} и перезагрузка...',
+    msg_no_response_rebooting_table: 'пока нет ответа - возможно, уже перезагружается (проверьте таблицу ниже через момент)',
+    msg_renamed_ok: '{old} теперь называется {new} и перезагружается - снова появится ниже под новым id, когда fleetbridge возобновит опрос',
+    msg_items_count: 'объектов: {n}',
+    confirm_delete_file: 'Удалить файл «{path}»?',
+    confirm_delete_dir: 'Удалить папку «{path}» со всем содержимым?',
+    root_label: '/ (корень)',
+  },
+};
+
+let LANG = localStorage.getItem('fleetLang') || (navigator.language && navigator.language.toLowerCase().startsWith('ru') ? 'ru' : 'en');
+
+// t('key') looks up the current language, falling back to English, then the
+// key itself - so a missing translation degrades to something visible
+// instead of throwing. tf() also fills in {placeholders}.
+function t(key) {
+  const dict = I18N[LANG] || I18N.en;
+  return (key in dict) ? dict[key] : ((key in I18N.en) ? I18N.en[key] : key);
+}
+function tf(key, vars) {
+  let s = t(key);
+  for (const k in (vars || {})) s = s.split('{' + k + '}').join(vars[k]);
+  return s;
+}
+
+function applyLang(lang) {
+  LANG = lang;
+  localStorage.setItem('fleetLang', lang);
+  document.documentElement.lang = lang;
+  document.title = t('page_h1');
+  document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = t(el.getAttribute('data-i18n')); });
+  document.querySelectorAll('[data-i18n-ph]').forEach(el => { el.placeholder = t(el.getAttribute('data-i18n-ph')); });
+  document.querySelectorAll('[data-i18n-html]').forEach(el => { el.innerHTML = t(el.getAttribute('data-i18n-html')); });
+  document.querySelectorAll('[data-i18n-title]').forEach(el => { el.title = t(el.getAttribute('data-i18n-title')); });
+  document.querySelectorAll('.lang-btn').forEach(b => b.classList.toggle('active', b.dataset.lang === lang));
+  // Re-render every section that builds its own text in JS (table headers,
+  // button captions, status pill wording, ...) so switching language takes
+  // effect everywhere immediately, not just in the static markup above.
+  updateTargetLabels();
+  loadComputeScripts();
+  refreshStatus();
+  // Deliberately NOT explorerRefresh() here: it would re-issue a live
+  // "list" command to whatever node is selected just to relabel two column
+  // headers, which are already retranslated by the data-i18n sweep above -
+  // a language toggle shouldn't cost a round trip to a real computer.
+}
+
+document.addEventListener('DOMContentLoaded', () => applyLang(LANG));
+
 // Every request to the bridge goes through here so the API key (if any)
 // is never forgotten on some new fetch() call added later - only ever
 // sent to API_BASE itself, same rule apps/common/fleetbridge.lua follows.
-function apiFetch(path, options) {
+// X-Fleet-Dashboard is sent unconditionally (not just when an API key is
+// set) - bridge_server.py requires it on every state-changing route so a
+// random cross-origin page open in another tab can't blindly fire commands
+// via fetch()/a form POST (see bridge_server.py's CSRF_HEADER comment).
+// Throws with a readable message on a network failure or non-2xx response
+// so callers' try/catch can show something useful instead of silently
+// going stale (a bare fetch() rejection has no useful .message otherwise).
+// without a timeout, a dropped connection or a bridge process that's
+// hung (not crashed - crashed at least fails the TCP connect fast) leaves
+// this fetch() pending forever, and the whole calling UI action (button
+// stuck "disabled", a poll cycle that never comes back around) hangs with
+// it. Default is generous enough for a slow LAN but still bounded; callers
+// expecting a long-running route (e.g. /compute/<name>, which can wait up
+// to COMPUTE_WORLD_TIMEOUT_SECONDS=30s server-side) pass a longer timeoutMs.
+const API_FETCH_DEFAULT_TIMEOUT_MS = 15000;
+
+async function apiFetch(path, options, timeoutMs) {
   options = options || {};
-  const headers = Object.assign({}, options.headers || {});
+  const headers = Object.assign({ 'X-Fleet-Dashboard': '1' }, options.headers || {});
   if (API_KEY) headers['X-API-Key'] = API_KEY;
-  return fetch(API_BASE + path, Object.assign({}, options, { headers }));
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs || API_FETCH_DEFAULT_TIMEOUT_MS);
+  let res;
+  try {
+    res = await fetch(API_BASE + path, Object.assign({}, options, { headers, signal: controller.signal }));
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      throw new Error(`bridge request to ${path} timed out after ${(timeoutMs || API_FETCH_DEFAULT_TIMEOUT_MS) / 1000}s`);
+    }
+    throw new Error(`bridge unreachable at ${API_BASE} (${err.message})`);
+  } finally {
+    clearTimeout(timer);
+  }
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || ('HTTP ' + res.status));
+  }
+  return res;
 }
 
 // ---- Node selection - every computer is equal, this just tracks which
-// one Terminal/Remote files currently talk to ----
+// one Terminal/Explorer currently talk to ----
 let selectedNode = localStorage.getItem('fleetSelectedNode') || null;
 let knownNodeIds = [];
 
 function selectNode(id) {
+  // Switching nodes while editing a file loaded FROM a node would otherwise
+  // silently discard unsaved edits - only relevant when Explorer is
+  // currently browsing "Selected computer" (a PC-side edit is unaffected by
+  // which node happens to be selected).
+  if (explorerSource === 'node' && !explorerConfirmDiscard()) return;
   selectedNode = id || null;
   if (selectedNode) localStorage.setItem('fleetSelectedNode', selectedNode);
   else localStorage.removeItem('fleetSelectedNode');
   lastRenderedOutputLen = -1; // force terminal to redraw for the new node
   updateTargetLabels();
   refreshNodeDropdowns();
+  if (explorerSource === 'node') {
+    explorerPath = '';
+    explorerCloseEditor();
+  }
+  explorerRefresh();
 }
 
 function updateTargetLabels() {
-  const label = selectedNode ? `(${selectedNode})` : '(select a computer above)';
-  document.getElementById('termTarget').textContent = label;
+  const label = selectedNode ? `(${selectedNode})` : `(${t('msg_select_computer_first_short')})`;
+  document.getElementById('screenTarget').textContent = label;
   document.getElementById('filesTarget').textContent = label;
+  document.getElementById('selectedNodeLabel').textContent = label;
 }
 
 // Builds <option> HTML for a node dropdown. includeAll adds a "*" (every
-// known node) choice - used by per-app/macro target selects, not the main
-// computer picker (running/killing on "every node" from there wouldn't
-// make sense - that's what "*" targets are for).
+// known node) choice - used by per-app/macro target selects (there's no
+// main computer picker anymore - a table row click selects a node directly,
+// see selectNode()).
 function nodeOptionsHtml(selected, includeAll) {
   let html = includeAll ? `<option value="*">* (all)</option>` : '';
   for (const id of knownNodeIds) {
@@ -228,14 +691,10 @@ function nodeOptionsHtml(selected, includeAll) {
   return html;
 }
 
-// Refreshes every node dropdown's OPTIONS (main selector, every app row's
-// target, the macro target) without rebuilding rows - called whenever the
-// known node list changes (refreshStatus) or the main selection changes.
+// Refreshes every node dropdown's OPTIONS (every app row's target, the
+// macro target) without rebuilding rows - called whenever the known node
+// list changes (refreshStatus) or the main selection changes.
 function refreshNodeDropdowns() {
-  const main = document.getElementById('nodeSelect');
-  main.innerHTML = '<option value="">&mdash; select &mdash;</option>' + nodeOptionsHtml(selectedNode, false);
-  main.value = selectedNode || '';
-
   document.querySelectorAll('.node-target-select').forEach(el => {
     const current = el.value || selectedNode || '*';
     el.innerHTML = nodeOptionsHtml(current, true);
@@ -249,6 +708,7 @@ async function postCommand(cmd) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(cmd),
   });
+  lastCommandAt = Date.now(); // see scheduleNextPoll() - speeds up polling right after any command
   return res.json(); // { queued: true, id, nodes }
 }
 
@@ -262,6 +722,24 @@ async function awaitResult(id, tries = 15, delayMs = 400) {
     await new Promise(r => setTimeout(r, delayMs));
   }
   return null;
+}
+
+// Runs fn(), disabling `btn` (if given) and appending "..." to its label
+// for the duration - so a slow deploy/update/rename can't be double-clicked
+// and it's visible that something is happening. Any error fn() throws
+// (typically from apiFetch) is written into `statusEl` instead of being
+// silently swallowed or left as an unhandled rejection.
+async function withStatus(statusEl, btn, fn) {
+  let original;
+  if (btn) { original = btn.textContent; btn.disabled = true; btn.textContent = original + '...'; }
+  try {
+    await fn();
+  } catch (err) {
+    if (statusEl) statusEl.textContent = t('msg_error_prefix') + err.message;
+    else console.error(err);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = original; }
+  }
 }
 
 function statusClass(s) {
@@ -284,13 +762,224 @@ function renderTerminal(lines) {
   if (atBottom) el.scrollTop = el.scrollHeight;
 }
 
+// Real CC:Tweaked palette (colors.* bitmask -> hex), from
+// shared/util/Colour.java in the mod source - not a guess, matches exactly
+// what the game itself renders.
+const CC_COLORS = {
+  1: '#F0F0F0',     // white
+  2: '#F2B233',     // orange
+  4: '#E57FD8',     // magenta
+  8: '#99B2F2',     // lightBlue
+  16: '#DEDE6C',    // yellow
+  32: '#7FCC19',    // lime
+  64: '#F2B2CC',    // pink
+  128: '#4C4C4C',   // gray
+  256: '#999999',   // lightGray
+  512: '#4C99B2',   // cyan
+  1024: '#B266E5',  // purple
+  2048: '#3366CC',  // blue
+  4096: '#7F664C',  // brown
+  8192: '#57A64E',  // green
+  16384: '#CC4C4C', // red
+  32768: '#000000', // black
+};
+function ccColor(c) { return CC_COLORS[c] || CC_COLORS[1]; }
+
+// ---- Terminal/Monitor tabs - only one of the two panes is shown at a
+// time (picked via two plain buttons reusing the existing .secondary/
+// .active button style, same pattern as the EN/RU language switch above),
+// persisted so it survives a reload. ----
+
+let screenTab = localStorage.getItem('fleetScreenTab') || 'terminal';
+
+function selectScreenTab(tab) {
+  screenTab = tab;
+  localStorage.setItem('fleetScreenTab', tab);
+  updateScreenTabUI();
+}
+
+function updateScreenTabUI() {
+  const isMonitor = screenTab === 'monitor';
+  document.getElementById('terminalPane').style.display = isMonitor ? 'none' : '';
+  document.getElementById('monitorPane').style.display = isMonitor ? '' : 'none';
+  document.getElementById('screenTabTerminal').classList.toggle('active', !isMonitor);
+  document.getElementById('screenTabMonitor').classList.toggle('active', isMonitor);
+}
+
+// Our monospace screen font doesn't render at the same per-character pixel
+// aspect ratio real CC:Tweaked uses (FixedWidthFontRenderer: 6 wide x 9
+// tall pixel-units per glyph, ratio 2:3) - left alone, the grid renders too
+// close to square no matter how wide/tall the actual monitor block is
+// (e.g. a 3x2-block monitor visibly looked like a ~1x1 one). Stretches the
+// grid horizontally (scaleX, measured against its own untransformed
+// natural width so it works at any zoom/font) to reproduce the real
+// aspect ratio instead.
+// Always fills the full width of its pane (left edge to right edge),
+// with height derived purely from the real aspect ratio - a 1x1 monitor
+// stretches to (paneWidth x paneWidth), a 2x1 monitor to (paneWidth x
+// paneWidth/2), etc, at any pane width. Recomputed on every render, so it
+// tracks a monitor's size changing in-game (getSize()'s w/h changing)
+// automatically without any page reload.
+function applyMonitorAspect() {
+  const grid = document.getElementById('monitorGrid');
+  const box = document.getElementById('monitorGridBox');
+  const scroll = document.getElementById('monitorScroll');
+  const frame = document.getElementById('monitorFrame');
+  if (!lastMonitorW || !lastMonitorRows || !scroll || !frame) return;
+
+  // The box sits inside .monitor-frame's border+padding, so it must be
+  // sized to (scroll's width MINUS that border+padding), not the scroll
+  // container's full width - otherwise the frame overflows the pane by
+  // exactly that amount. Read live from computed style rather than
+  // hardcoding the CSS border/padding numbers, so this can't drift out of
+  // sync if that CSS ever changes.
+  const frameStyle = getComputedStyle(frame);
+  const frameExtraW = (parseFloat(frameStyle.borderLeftWidth) || 0) + (parseFloat(frameStyle.borderRightWidth) || 0)
+    + (parseFloat(frameStyle.paddingLeft) || 0) + (parseFloat(frameStyle.paddingRight) || 0);
+
+  // Prefer the EXACT real-world aspect ratio (config.lua's monitorBlocks,
+  // e.g. a real 7-block-wide by 4-block-tall monitor) when the node
+  // reports it - a monitor's character grid (w/h in columns/rows) doesn't
+  // map to its physical block aspect by a fixed constant (font cells
+  // aren't square and per-block bezels eat pixels unevenly), so the
+  // character-count approximation below can visibly not match. Only fall
+  // back to that approximation when monitorBlocks isn't configured.
+  const aspect = (lastMonitorBlockW && lastMonitorBlockH)
+    ? (lastMonitorBlockW / lastMonitorBlockH)
+    : (lastMonitorW * 6) / (lastMonitorRows * 9);
+
+  // scroll.clientWidth can be legitimately 0 for a moment (pane visible
+  // but momentarily zero-width, e.g. mid-layout-reflow after a sidebar
+  // toggle) - bail out rather than collapsing the box to 0x0, which would
+  // otherwise sit there until the next poll's renderMonitor() call happens
+  // to fire applyMonitorAspect() again.
+  const targetWidth = scroll.clientWidth - frameExtraW;
+  if (targetWidth <= 0) return;
+  const targetHeight = targetWidth / aspect;
+
+  // Fit the vertical axis by setting font-size directly (crisp, real font
+  // metrics) instead of a CSS transform scaleY - a transform-based scale
+  // rasterizes and stretches the already-rendered glyphs, which is why
+  // text previously looked visibly distorted/blurry whenever the target
+  // box was much bigger or smaller than the grid's default 22px font.
+  const fontPx = targetHeight / (lastMonitorRows * MONITOR_LINE_HEIGHT);
+  grid.style.fontSize = fontPx + 'px';
+  grid.style.transform = 'none';
+  const rect = grid.getBoundingClientRect();
+  if (!rect.width || !rect.height) return;
+
+  // Only the horizontal axis still needs correcting - real CC:Tweaked
+  // glyphs are 6x9 (non-square) pixel units, so even at the exact right
+  // font-size a normal monospace font's natural character width doesn't
+  // match the true in-game aspect. scaleX corrects just that; the
+  // vertical axis is never transform-scaled, so it stays crisp.
+  const scaleX = targetWidth / rect.width;
+  grid.style.transform = `scaleX(${scaleX})`;
+  box.style.width = Math.round(targetWidth) + 'px';
+  box.style.height = Math.round(targetHeight) + 'px';
+  lastMonitorBoxHeight = targetHeight;
+}
+
+// Sizes #termOutput to match the monitor's last-computed rendered height,
+// so switching between the Terminal/Monitor tabs doesn't jump around -
+// purely cosmetic, falls back to termOutput's own default CSS height
+// (340px) until a monitor snapshot has actually been seen.
+const MONITOR_LINE_HEIGHT = 1.15; // matches .monitor-grid's CSS line-height
+let lastMonitorRows = null;
+let lastMonitorBoxHeight = null;
+function syncTerminalHeightToMonitor() {
+  if (!lastMonitorBoxHeight) return;
+  document.getElementById('termOutput').style.height = Math.round(lastMonitorBoxHeight) + 'px';
+}
+
+let lastRenderedMonitorKey = null;
+
+// `snapshot` is fleetos.lua's getMonitorSnapshot() shape - {w, h, bg,
+// rows: [[{text,color}...], ...]} - or null/undefined if no monitor has
+// ever been found/drawn to on that node this session. Segment text comes
+// straight from a node's own report (a compromised/misbehaving node
+// controls it, same threat model as appsSummaryFragment above) - always
+// textContent, never innerHTML, so it can't become a stored-XSS vector for
+// anyone else viewing this dashboard.
+function renderMonitor(snapshot) {
+  const frame = document.getElementById('monitorFrame');
+  const grid = document.getElementById('monitorGrid');
+  const status = document.getElementById('monitorStatus');
+  if (!snapshot) {
+    frame.style.display = 'none';
+    status.textContent = t('msg_no_monitor');
+    lastRenderedMonitorKey = null;
+    return;
+  }
+  lastMonitorW = snapshot.w;
+  lastMonitorRows = snapshot.h;
+  lastMonitorBlockW = snapshot.blockW || null;
+  lastMonitorBlockH = snapshot.blockH || null;
+
+  // Cheap unchanged-frame guard, same spirit as renderTerminal's length
+  // check - avoids rebuilding the whole DOM grid every 2s poll when the
+  // monitor hasn't actually changed.
+  const key = JSON.stringify(snapshot);
+  if (key === lastRenderedMonitorKey) return;
+  lastRenderedMonitorKey = key;
+
+  frame.style.display = 'inline-block';
+  status.textContent = '';
+  grid.style.background = ccColor(snapshot.bg || 32768);
+  grid.innerHTML = '';
+  for (const rowSegments of (snapshot.rows || [])) {
+    const rowEl = document.createElement('div');
+    rowEl.className = 'monitor-row';
+    for (const seg of rowSegments) {
+      const span = document.createElement('span');
+      span.textContent = seg.text;
+      span.style.color = ccColor(seg.color);
+      rowEl.appendChild(span);
+    }
+    grid.appendChild(rowEl);
+  }
+  applyMonitorAspect();
+  syncTerminalHeightToMonitor();
+}
+
+// ---- Clicking the monitor emulation - translates the click position into
+// a character column/row (dividing the grid's rendered box evenly by
+// snapshot.w/h, not exact font-glyph-metric math - close enough for
+// hit-testing) and sends it as a real "monitor_touch" command, which
+// fleetos.touchMonitor() turns into a genuine monitor_touch event on that
+// node - so this fires the SAME run/kill/minimize/restore/collapse
+// handling a real finger tap would (see monitorMirrorLoop in fleetos.lua),
+// not a separate reimplementation of that logic in JS. ----
+
+let lastMonitorW = null;
+let lastMonitorBlockW = null;
+let lastMonitorBlockH = null;
+
+async function onMonitorGridClick(ev) {
+  if (!selectedNode || !lastMonitorW || !lastMonitorRows) return;
+  const rect = ev.currentTarget.getBoundingClientRect();
+  const col = Math.floor((ev.clientX - rect.left) / (rect.width / lastMonitorW)) + 1;
+  const row = Math.floor((ev.clientY - rect.top) / (rect.height / lastMonitorRows)) + 1;
+  const x = Math.min(lastMonitorW, Math.max(1, col));
+  const y = Math.min(lastMonitorRows, Math.max(1, row));
+  const status = document.getElementById('monitorStatus');
+  await withStatus(status, null, async () => {
+    await postCommand({ type: 'monitor_touch', node: selectedNode, x, y });
+  });
+}
+document.getElementById('monitorGrid').addEventListener('click', onMonitorGridClick);
+
 async function sendTerminalLine() {
-  if (!selectedNode) { alert('Select a computer first (Fleet section above)'); return; }
+  if (!selectedNode) { alert(t('msg_select_computer_first')); return; }
   const input = document.getElementById('termInput');
   const text = input.value;
   if (!text) return;
   input.value = '';
-  await postCommand({ type: 'type', node: selectedNode, text });
+  try {
+    await postCommand({ type: 'type', node: selectedNode, text });
+  } catch (err) {
+    document.getElementById('termOutput').textContent += `\n[dashboard] ${err.message}`;
+  }
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -299,177 +988,807 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 });
 
-// ---- Remote files (on the real in-game computer) ----
+// ---- Explorer (browse/open/edit/create/delete files+folders, either on a
+// selected in-game computer OR directly on this PC - a Windows-style file
+// explorer over three interchangeable "sources") ----
 
-// guards against a double-click (or Read then Write in quick succession)
-// racing each other and letting a stale response overwrite a fresher one
-let remoteFileRequestSeq = 0;
+// Each provider exposes the same {list,read,write,mkdir,del} shape so the
+// rest of the Explorer UI never has to know or care which source is active
+// (the earlier node-only version was hard-wired to selectedNode/postCommand
+// throughout - this abstraction is the fix).
+// "node" talks to the selected in-game computer via the existing /command
+// (queue) -> poll -> /result/<id> round trip (fleetbridge.lua's list/mkdir/
+// delete/readfile/writefile). "pc_game"/"pc_compute" talk directly to
+// bridge_server.py's /pcfiles* routes, rooted at game/ and windows/compute/
+// on THIS PC - no node involved, no round-trip latency.
+function makeNodeProvider() {
+  async function runAndAwait(cmd) {
+    if (!selectedNode) throw new Error(t('msg_select_computer_first_short'));
+    const { id } = await postCommand(Object.assign({ node: selectedNode }, cmd));
+    const result = await awaitResult(id);
+    if (!result) throw new Error(tf('msg_no_response', { node: selectedNode }));
+    if (result.error) throw new Error(result.error);
+    return result;
+  }
+  return {
+    label: () => selectedNode,
+    async list(path) { return (await runAndAwait({ type: 'list', path })).entries || []; },
+    async read(path) { return (await runAndAwait({ type: 'readfile', path })).content; },
+    async write(path, content) { await runAndAwait({ type: 'writefile', path, content }); },
+    async mkdir(path) { return await runAndAwait({ type: 'mkdir', path }); },
+    async del(path) { await runAndAwait({ type: 'delete', path }); },
+    async move(from, to) { await runAndAwait({ type: 'move', from, to }); },
+  };
+}
 
-async function readRemoteFile() {
-  if (!selectedNode) { alert('Select a computer first (Fleet section above)'); return; }
-  const mySeq = ++remoteFileRequestSeq;
-  const path = document.getElementById('remotePath').value;
-  const status = document.getElementById('remoteFileStatus');
-  status.textContent = 'reading...';
-  const { id } = await postCommand({ type: 'readfile', node: selectedNode, path });
-  const result = await awaitResult(id);
-  if (mySeq !== remoteFileRequestSeq) return; // a newer request has since started
-  if (!result) {
-    status.textContent = 'no response (is fleetbridge.lua running on ' + selectedNode + '?)';
-  } else if (result.error) {
-    status.textContent = 'error: ' + result.error;
-  } else {
-    document.getElementById('remoteFileContent').value = result.content;
-    status.textContent = `read ${result.content.length} bytes from ${path} on ${selectedNode}`;
+function makePcProvider(root) {
+  const q = (path) => `root=${root}&path=${encodeURIComponent(path)}`;
+  return {
+    label: () => root === 'game' ? 'game/' : 'compute/',
+    async list(path) { return (await (await apiFetch('/pcfiles?' + q(path))).json()).entries || []; },
+    async read(path) { return await (await apiFetch('/pcfiles/read?' + q(path))).text(); },
+    async write(path, content) {
+      await apiFetch('/pcfiles/write', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ root, path, content }),
+      });
+    },
+    async mkdir(path) {
+      const res = await apiFetch('/pcfiles/mkdir', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ root, path }),
+      });
+      return res.json();
+    },
+    async del(path) {
+      await apiFetch('/pcfiles/delete', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ root, path }),
+      });
+    },
+    async move(from, to) {
+      await apiFetch('/pcfiles/move', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ root, from, to }),
+      });
+    },
+  };
+}
+
+const EXPLORER_PROVIDERS = { node: makeNodeProvider(), pc_game: makePcProvider('game'), pc_compute: makePcProvider('compute') };
+
+let explorerSource = 'node';
+let explorerPath = '';       // '' = root
+let explorerOpenPath = null; // path currently loaded in the editor box, or null
+let explorerLoadedContent = null; // editor content AS LOADED, to detect unsaved edits
+let explorerRequestSeq = 0;  // guards against a slower, older request rendering AFTER a newer one
+
+function explorerProvider() { return EXPLORER_PROVIDERS[explorerSource]; }
+
+// True if the file editor is open and its textarea no longer matches what
+// was loaded - used before any navigation/switch that would otherwise
+// silently discard those edits (the earlier version lost edits with zero
+// warning).
+function explorerHasUnsavedChanges() {
+  return explorerOpenPath !== null && document.getElementById('remoteFileContent').value !== explorerLoadedContent;
+}
+
+function explorerConfirmDiscard() {
+  if (!explorerHasUnsavedChanges()) return true;
+  return confirm(tf('msg_unsaved_confirm', { path: explorerOpenPath }));
+}
+
+// explorerConfirmDiscard() above only guards in-page navigation
+// (switching nodes/sources/files) - it does nothing for an actual tab
+// close/reload/back-navigation, which silently discarded an in-progress
+// edit with zero warning. beforeunload's confirmation dialog text is
+// browser-controlled (can't be customized), but returning a non-empty
+// string/setting returnValue is what triggers it at all.
+window.addEventListener('beforeunload', (ev) => {
+  if (explorerHasUnsavedChanges()) {
+    ev.preventDefault();
+    ev.returnValue = '';
+  }
+});
+
+function explorerSourceChanged() {
+  if (!explorerConfirmDiscard()) {
+    document.getElementById('explorerSource').value = explorerSource; // revert the select
+    return;
+  }
+  explorerSource = document.getElementById('explorerSource').value;
+  explorerPath = '';
+  explorerCloseEditor();
+  explorerRefresh();
+}
+
+function explorerRenderBreadcrumb() {
+  const el = document.getElementById('explorerBreadcrumb');
+  el.innerHTML = '';
+  const rootBtn = document.createElement('button');
+  rootBtn.className = 'secondary';
+  rootBtn.textContent = t('root_label');
+  rootBtn.onclick = () => explorerGo('');
+  el.appendChild(rootBtn);
+  if (explorerPath) {
+    let acc = '';
+    for (const part of explorerPath.split('/')) {
+      acc = acc ? acc + '/' + part : part;
+      const target = acc;
+      const b = document.createElement('button');
+      b.className = 'secondary';
+      b.textContent = part;
+      b.onclick = () => explorerGo(target);
+      el.appendChild(b);
+    }
   }
 }
 
-async function writeRemoteFile() {
-  if (!selectedNode) { alert('Select a computer first (Fleet section above)'); return; }
-  const mySeq = ++remoteFileRequestSeq;
-  const path = document.getElementById('remotePath').value;
+function explorerGo(path) {
+  if (!explorerConfirmDiscard()) return;
+  explorerPath = path;
+  explorerRefresh();
+}
+
+async function explorerRefresh() {
+  explorerRenderBreadcrumb();
+  const status = document.getElementById('explorerStatus');
+  const table = document.getElementById('explorerTable');
+  const myRequest = ++explorerRequestSeq;
+  const requestPath = explorerPath;
+  if (explorerSource === 'node' && !selectedNode) {
+    status.textContent = t('msg_select_computer_first_short');
+    table.innerHTML = `<tr><th>${t('col_name')}</th><th>${t('col_size')}</th><th></th></tr>`;
+    return;
+  }
+  status.textContent = t('msg_loading');
+  try {
+    const entries = await explorerProvider().list(requestPath);
+    // A slower, older request (e.g. from a breadcrumb double-click) can
+    // resolve after a newer one - only the latest request may render.
+    if (myRequest !== explorerRequestSeq) return;
+    table.innerHTML = `<tr><th>${t('col_name')}</th><th>${t('col_size')}</th><th></th></tr>`;
+    for (const entry of entries) explorerAppendRow(table, entry);
+    status.textContent = tf('msg_items_count', { n: entries.length });
+  } catch (err) {
+    if (myRequest !== explorerRequestSeq) return;
+    status.textContent = t('msg_error_prefix') + err.message;
+  }
+}
+
+// textContent/createElement throughout - entry.name comes from real disk
+// content (a node's report, or this PC's own listing) - same "never
+// innerHTML on non-static data" rule as appsSummaryFragment() below.
+const FILE_ICONS = { lua: '\u{1F319}', py: '\u{1F40D}', txt: '\u{1F4C4}', json: '\u{1F5C3}', log: '\u{1F4DC}', cpp: '⚙', dat: '\u{1F5C4}' };
+function fileIcon(name) {
+  const ext = name.includes('.') ? name.split('.').pop().toLowerCase() : '';
+  return FILE_ICONS[ext] || '\u{1F4C4}';
+}
+
+function explorerAppendRow(table, entry) {
+  const fullPath = explorerPath ? explorerPath + '/' + entry.name : entry.name;
+  const tr = document.createElement('tr');
+
+  const tdName = document.createElement('td');
+  const link = document.createElement('a');
+  link.textContent = (entry.isDir ? '\u{1F4C1} ' : fileIcon(entry.name) + ' ') + entry.name;
+  link.onclick = () => entry.isDir ? explorerGo(fullPath) : explorerOpen(fullPath);
+  const renameBtn = document.createElement('a');
+  renameBtn.className = 'explorer-rename-btn';
+  renameBtn.title = t('btn_rename_item');
+  renameBtn.textContent = '✏️';
+  renameBtn.onclick = (ev) => { ev.stopPropagation(); explorerStartRename(tr, tdName, entry, fullPath); };
+  tdName.append(link, ' ', renameBtn);
+
+  const tdSize = document.createElement('td');
+  tdSize.textContent = entry.isDir ? '' : (entry.size + ' B');
+
+  const tdActions = document.createElement('td');
+  const openBtn = document.createElement('button');
+  openBtn.className = 'secondary';
+  openBtn.textContent = entry.isDir ? t('btn_open') : t('btn_edit');
+  openBtn.onclick = () => entry.isDir ? explorerGo(fullPath) : explorerOpen(fullPath);
+  tdActions.appendChild(openBtn);
+
+  // Running a file only makes sense on a real computer (a PC-side file
+  // isn't live anywhere) - hidden for pc_game/pc_compute sources. Also
+  // only offered for .lua files: shell.run executes Lua programs only,
+  // so e.g. a .py/.txt file would always fail (or, on the local Windows
+  // simulation, just hit craftos_shim.lua's shell.run stub) - showing
+  // Run for those was misleading, not a real capability.
+  if (!entry.isDir && explorerSource === 'node' && /\.lua$/i.test(entry.name)) {
+    const runBtn = document.createElement('button');
+    runBtn.className = 'secondary';
+    runBtn.textContent = t('btn_run_file');
+    runBtn.onclick = () => explorerRowAction(tr, () => explorerRunFile(fullPath));
+    tdActions.appendChild(runBtn);
+  }
+
+  const dlBtn = document.createElement('button');
+  dlBtn.className = 'secondary';
+  dlBtn.textContent = t('btn_download');
+  dlBtn.onclick = () => explorerRowAction(tr, () => explorerDownload(fullPath, entry.isDir, entry.name));
+  tdActions.appendChild(dlBtn);
+
+  const delBtn = document.createElement('button');
+  delBtn.textContent = t('btn_delete');
+  delBtn.onclick = () => explorerRowAction(tr, () => explorerDelete(fullPath, entry.isDir));
+  tdActions.appendChild(delBtn);
+
+  tr.append(tdName, tdSize, tdActions);
+  table.appendChild(tr);
+}
+
+// Inline rename: swaps the name cell for a text input (pre-filled, focused
+// and selected) instead of a prompt() dialog - Enter or clicking away
+// commits, Escape cancels. Uses the generic "move" command/route (fs.move -
+// a real rename, not read+write+delete).
+function explorerStartRename(tr, tdName, entry, fullPath) {
+  const input = document.createElement('input');
+  input.value = entry.name;
+  input.style.width = '160px';
+  tdName.innerHTML = '';
+  tdName.appendChild(input);
+  input.focus();
+  input.select();
+  let done = false;
+  const finish = async (commit) => {
+    if (done) return;
+    done = true;
+    if (!commit) { await explorerRefresh(); return; }
+    const newName = input.value.trim();
+    if (!newName || newName === entry.name) { await explorerRefresh(); return; }
+    const newPath = explorerPath ? explorerPath + '/' + newName : newName;
+    await explorerRowAction(tr, async () => {
+      const status = document.getElementById('explorerStatus');
+      try {
+        await explorerProvider().move(fullPath, newPath);
+        if (explorerOpenPath === fullPath) {
+          explorerOpenPath = newPath;
+          document.getElementById('explorerEditingPath').textContent = newPath;
+        }
+        await explorerRefresh();
+      } catch (err) {
+        status.textContent = t('msg_error_prefix') + err.message;
+      }
+    });
+  };
+  input.onkeydown = (ev) => {
+    if (ev.key === 'Enter') finish(true);
+    else if (ev.key === 'Escape') finish(false);
+  };
+  input.onblur = () => finish(true); // clicking away commits, same as Windows Explorer's inline rename
+}
+
+// Sends a "type" command with the path as the line - equivalent to typing
+// that path at the real shell prompt, which is how CraftOS runs a program
+// by name/path. Only offered for the "node" source (see explorerAppendRow).
+async function explorerRunFile(path) {
+  if (!selectedNode) return;
+  const status = document.getElementById('explorerStatus');
+  await withStatus(status, null, async () => {
+    await postCommand({ type: 'type', node: selectedNode, text: path });
+    status.textContent = tf('msg_ran_file', { path });
+  });
+}
+
+// Marks a row visually busy (dimmed, unclickable) for the duration of a
+// row-scoped action (Delete) - the ~1-7s node round trip otherwise gave no
+// feedback at all that a click had registered.
+async function explorerRowAction(tr, fn) {
+  tr.classList.add('busy');
+  try { await fn(); } finally { tr.classList.remove('busy'); }
+}
+
+// Recognizes game/apps/<name>.lua or game/apps/<group>/<name>.lua (matches
+// APP_GROUPS on the PC side) so the editor can offer Run/Kill/Deploy
+// directly, instead of a separate "Local apps" table duplicating the same
+// files - only meaningful for the "This PC - game/" source, since a node's
+// OWN copy of an app isn't "the source to deploy from".
+function explorerAppNameFromPath(path) {
+  if (explorerSource !== 'pc_game') return null;
+  const m = path.match(/^apps\/(?:[^/]+\/)?([^/]+)\.lua$/);
+  return m ? m[1] : null;
+}
+
+async function explorerOpen(path) {
+  if (explorerSource === 'node' && !selectedNode) return;
+  if (!explorerConfirmDiscard()) return;
+  const status = document.getElementById('explorerStatus');
+  await withStatus(status, null, async () => {
+    const content = await explorerProvider().read(path);
+    explorerOpenPath = path;
+    explorerLoadedContent = content;
+    document.getElementById('explorerEditingPath').textContent = path;
+    document.getElementById('remoteFileContent').value = content;
+    document.getElementById('fileEditorBox').style.display = 'block';
+    document.getElementById('remoteFileStatus').textContent = '';
+    document.getElementById('explorerAppActionsStatus').textContent = '';
+
+    const appName = explorerAppNameFromPath(path);
+    const actionsRow = document.getElementById('explorerAppActionsRow');
+    if (appName) {
+      actionsRow.style.display = 'flex';
+      actionsRow.dataset.appName = appName;
+      refreshNodeDropdowns();
+    } else {
+      actionsRow.style.display = 'none';
+    }
+  });
+}
+
+function explorerCloseEditor() {
+  explorerOpenPath = null;
+  explorerLoadedContent = null;
+  document.getElementById('fileEditorBox').style.display = 'none';
+  document.getElementById('remoteFileContent').value = '';
+  document.getElementById('explorerAppActionsRow').style.display = 'none';
+}
+
+async function explorerAppRun(btn) {
+  const app = document.getElementById('explorerAppActionsRow').dataset.appName;
+  const node = document.getElementById('explorerAppTarget').value || '*';
+  const status = document.getElementById('explorerAppActionsStatus');
+  await withStatus(status, btn, () => postCommand({ type: 'run', node, app }));
+}
+
+async function explorerAppKill(btn) {
+  const app = document.getElementById('explorerAppActionsRow').dataset.appName;
+  const node = document.getElementById('explorerAppTarget').value || '*';
+  const status = document.getElementById('explorerAppActionsStatus');
+  await withStatus(status, btn, () => postCommand({ type: 'kill', node, app }));
+}
+
+async function explorerAppDeploy(btn) {
+  const app = document.getElementById('explorerAppActionsRow').dataset.appName;
+  const node = document.getElementById('explorerAppTarget').value || '*';
+  const status = document.getElementById('explorerAppActionsStatus');
+  await withStatus(status, btn, async () => {
+    if (explorerHasUnsavedChanges()) await explorerSaveFile(); // deploy what you're looking at, not a stale save
+    await deployAndRun(app, node);
+    status.textContent = tf('msg_deployed_to', { node });
+  });
+}
+
+async function explorerSaveFile() {
+  if (!explorerOpenPath) return;
+  const path = explorerOpenPath;
   const content = document.getElementById('remoteFileContent').value;
   const status = document.getElementById('remoteFileStatus');
-  status.textContent = 'writing...';
-  const { id } = await postCommand({ type: 'writefile', node: selectedNode, path, content });
-  const result = await awaitResult(id);
-  if (mySeq !== remoteFileRequestSeq) return;
-  if (!result) {
-    status.textContent = 'no response (is fleetbridge.lua running on ' + selectedNode + '?)';
-  } else if (result.error) {
-    status.textContent = 'error: ' + result.error;
-  } else {
-    status.textContent = `wrote ${content.length} bytes to ${path} on ${selectedNode}`;
+  await withStatus(status, null, async () => {
+    await explorerProvider().write(path, content);
+    explorerLoadedContent = content; // just-saved content is no longer "unsaved"
+    status.textContent = tf('msg_wrote_bytes', { n: content.length, path });
+  });
+}
+
+async function explorerMkdir() {
+  const status0 = document.getElementById('explorerStatus');
+  if (explorerSource === 'node' && !selectedNode) { status0.textContent = t('msg_select_computer_first_short'); return; }
+  const nameInput = document.getElementById('newFolderName');
+  const name = nameInput.value.trim();
+  if (!name) { status0.textContent = t('msg_name_required'); nameInput.focus(); return; }
+  const path = explorerPath ? explorerPath + '/' + name : name;
+  const status = document.getElementById('explorerStatus');
+  await withStatus(status, null, async () => {
+    const result = await explorerProvider().mkdir(path);
+    nameInput.value = '';
+    await explorerRefresh();
+    if (result && result.alreadyExisted) status.textContent = t('msg_folder_exists');
+  });
+}
+
+async function explorerNewFile() {
+  const status0 = document.getElementById('explorerStatus');
+  if (explorerSource === 'node' && !selectedNode) { status0.textContent = t('msg_select_computer_first_short'); return; }
+  const nameInput = document.getElementById('newFileName');
+  const name = nameInput.value.trim();
+  if (!name) { status0.textContent = t('msg_name_required'); nameInput.focus(); return; }
+  const path = explorerPath ? explorerPath + '/' + name : name;
+  const status = document.getElementById('explorerStatus');
+  await withStatus(status, null, async () => {
+    await explorerProvider().write(path, '');
+    nameInput.value = '';
+    await explorerRefresh();
+    await explorerOpen(path);
+  });
+}
+
+async function explorerDelete(path, isDir) {
+  const msg = tf(isDir ? 'confirm_delete_dir' : 'confirm_delete_file', { path });
+  if (!confirm(msg)) return;
+  const status = document.getElementById('explorerStatus');
+  await withStatus(status, null, async () => {
+    await explorerProvider().del(path);
+    if (explorerOpenPath === path) explorerCloseEditor();
+    await explorerRefresh();
+  });
+}
+
+// ---- Download (single file, or a whole folder zipped client-side) ----
+
+function downloadBlob(filename, blob) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// Minimal ZIP writer (STORED = uncompressed entries only - no dependency,
+// no need for a compression library for what's almost always small
+// Lua/Python/text files). Every mainstream unzip tool (including Windows
+// Explorer's built-in support) reads STORED entries just fine.
+function crc32(bytes) {
+  if (!crc32.table) {
+    const table = [];
+    for (let n = 0; n < 256; n++) {
+      let c = n;
+      for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+      table[n] = c >>> 0;
+    }
+    crc32.table = table;
   }
+  let crc = 0xFFFFFFFF;
+  for (let i = 0; i < bytes.length; i++) crc = crc32.table[(crc ^ bytes[i]) & 0xFF] ^ (crc >>> 8);
+  return (crc ^ 0xFFFFFFFF) >>> 0;
+}
+function u16(n) { return [n & 0xFF, (n >>> 8) & 0xFF]; }
+function u32(n) { return [n & 0xFF, (n >>> 8) & 0xFF, (n >>> 16) & 0xFF, (n >>> 24) & 0xFF]; }
+
+function buildZip(entries) {
+  const encoder = new TextEncoder();
+  const localChunks = [], centralChunks = [];
+  let offset = 0;
+  for (const entry of entries) {
+    const nameBytes = encoder.encode(entry.path);
+    const dataBytes = encoder.encode(entry.content);
+    const crc = crc32(dataBytes);
+    const localHeader = new Uint8Array([
+      0x50, 0x4b, 0x03, 0x04,
+      ...u16(20), ...u16(0x0800), ...u16(0), ...u16(0), ...u16(0x21),
+      ...u32(crc), ...u32(dataBytes.length), ...u32(dataBytes.length),
+      ...u16(nameBytes.length), ...u16(0),
+    ]);
+    localChunks.push(localHeader, nameBytes, dataBytes);
+    const localOffset = offset;
+    offset += localHeader.length + nameBytes.length + dataBytes.length;
+
+    const centralHeader = new Uint8Array([
+      0x50, 0x4b, 0x01, 0x02,
+      ...u16(20), ...u16(20), ...u16(0x0800), ...u16(0), ...u16(0), ...u16(0x21),
+      ...u32(crc), ...u32(dataBytes.length), ...u32(dataBytes.length),
+      ...u16(nameBytes.length), ...u16(0), ...u16(0),
+      ...u16(0), ...u16(0), ...u32(0),
+      ...u32(localOffset),
+    ]);
+    centralChunks.push(centralHeader, nameBytes);
+  }
+  const centralStart = offset;
+  const centralSize = centralChunks.reduce((sum, c) => sum + c.length, 0);
+  const end = new Uint8Array([
+    0x50, 0x4b, 0x05, 0x06,
+    ...u16(0), ...u16(0),
+    ...u16(entries.length), ...u16(entries.length),
+    ...u32(centralSize), ...u32(centralStart),
+    ...u16(0),
+  ]);
+  const all = [...localChunks, ...centralChunks, end];
+  const total = all.reduce((sum, c) => sum + c.length, 0);
+  const result = new Uint8Array(total);
+  let pos = 0;
+  for (const c of all) { result.set(c, pos); pos += c.length; }
+  return result;
+}
+
+async function explorerDownload(path, isDir, name) {
+  const status = document.getElementById('explorerStatus');
+  const provider = explorerProvider();
+  await withStatus(status, null, async () => {
+    if (!isDir) {
+      const content = await provider.read(path);
+      downloadBlob(name, new Blob([content], { type: 'text/plain' }));
+      return;
+    }
+    const files = [];
+    async function walk(p) {
+      for (const e of await provider.list(p)) {
+        const childPath = p ? p + '/' + e.name : e.name;
+        if (e.isDir) await walk(childPath);
+        else files.push({ path: childPath.slice(path.length + 1), content: await provider.read(childPath) });
+      }
+    }
+    await walk(path);
+    downloadBlob(name + '.zip', new Blob([buildZip(files)], { type: 'application/zip' }));
+  });
+}
+
+// Enter-to-submit on the New folder/file name inputs, same convenience the
+// Terminal input already has.
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('newFolderName').addEventListener('keydown', e => { if (e.key === 'Enter') explorerMkdir(); });
+  document.getElementById('newFileName').addEventListener('keydown', e => { if (e.key === 'Enter') explorerNewFile(); });
+});
+
+// ---- Explorer drag-and-drop upload (files AND whole folders, into
+// whichever source/path is currently open) ----
+
+function explorerOnDragOver(ev) { ev.preventDefault(); document.getElementById('explorerDropZone').classList.add('dragover'); }
+function explorerOnDragLeave(ev) { document.getElementById('explorerDropZone').classList.remove('dragover'); }
+
+function fsEntryToFile(entry) { return new Promise((resolve, reject) => entry.file(resolve, reject)); }
+
+function readDirEntries(dirEntry) {
+  return new Promise((resolve, reject) => {
+    const reader = dirEntry.createReader();
+    let all = [];
+    (function readBatch() {
+      reader.readEntries(batch => {
+        if (!batch.length) { resolve(all); return; }
+        all = all.concat(batch);
+        readBatch();
+      }, reject);
+    })();
+  });
+}
+
+// Flattens a dropped file/directory entry (recursively) into `out`, paths
+// relative to wherever the drop landed (basePath = explorerPath at drop time).
+async function walkEntry(entry, basePath, out) {
+  const path = basePath ? basePath + '/' + entry.name : entry.name;
+  if (entry.isDirectory) {
+    out.push({ path, isDir: true });
+    for (const child of await readDirEntries(entry)) await walkEntry(child, path, out);
+  } else {
+    out.push({ path, isDir: false, fileEntry: entry });
+  }
+}
+
+async function explorerOnDrop(ev) {
+  ev.preventDefault();
+  document.getElementById('explorerDropZone').classList.remove('dragover');
+  if (explorerSource === 'node' && !selectedNode) {
+    document.getElementById('explorerStatus').textContent = t('msg_select_computer_first_short');
+    return;
+  }
+  const dt = ev.dataTransfer;
+  const status = document.getElementById('explorerStatus');
+  const provider = explorerProvider();
+  const basePath = explorerPath;
+
+  await withStatus(status, null, async () => {
+    let flat = [];
+    const items = Array.from(dt.items || []);
+    const entries = items.map(it => it.webkitGetAsEntry && it.webkitGetAsEntry()).filter(Boolean);
+    if (entries.length) {
+      for (const entry of entries) await walkEntry(entry, basePath, flat);
+    } else if (dt.files && dt.files.length) {
+      // Fallback when webkitGetAsEntry isn't available: flat files only,
+      // no folder recursion (the browser doesn't expose folder structure
+      // through a plain FileList).
+      flat = Array.from(dt.files).map(file => ({
+        path: basePath ? basePath + '/' + file.name : file.name, isDir: false, file,
+      }));
+    } else {
+      return;
+    }
+
+    const dirs = flat.filter(e => e.isDir).map(e => e.path);
+    const files = flat.filter(e => !e.isDir);
+    for (const dirPath of dirs) await provider.mkdir(dirPath);
+    let done = 0;
+    for (const f of files) {
+      const file = f.file || await fsEntryToFile(f.fileEntry);
+      const content = await file.text();
+      await provider.write(f.path, content);
+      done++;
+      status.textContent = tf('msg_uploading', { done, total: files.length });
+    }
+    status.textContent = tf('msg_upload_done', { n: flat.length });
+    await explorerRefresh();
+  });
 }
 
 // ---- Self-update (fleetos.lua isn't an "app" - deploy can't touch it) ----
+// Deliberately fleet-wide only, no per-node/per-folder/per-selection
+// variant: every computer should always be running the same fleetos.lua,
+// so a partial update would just create a fleet running mismatched kernel
+// versions - one button, always "*".
 
-async function updateFleetos(node) {
+async function updateFleetos(btn) {
   const status = document.getElementById('updateStatus');
-  if (!node) { status.textContent = 'select a computer first (or use "Update fleetos (all)")'; return; }
-  status.textContent = `fetching fleetos.lua on ${node === '*' ? 'every computer' : node} and rebooting...`;
-  const { id } = await postCommand({ type: 'update', node });
-  const result = await awaitResult(id);
-  if (!result) {
-    status.textContent = 'no response yet - it may already be rebooting (check "last report" below in a moment)';
-  } else if (result.error) {
-    status.textContent = 'error: ' + result.error;
-  } else if (node === '*') {
-    status.textContent = 'at least one computer acked and is rebooting - "*" only shows one result at a time, check each node\'s "last report" age below to confirm they all restarted';
-  } else {
-    status.textContent = node + ' fetched the new fleetos.lua and is rebooting - it will reappear below once fleetbridge starts polling again';
-  }
+  status.textContent = tf('msg_fetching_reboot', { node: t('msg_every_computer') });
+  await withStatus(status, btn, async () => {
+    const { id } = await postCommand({ type: 'update', node: '*' });
+    const result = await awaitResult(id);
+    if (!result) {
+      status.textContent = t('msg_no_response_rebooting');
+    } else if (result.error) {
+      status.textContent = t('msg_error_prefix') + result.error;
+    } else {
+      status.textContent = t('msg_update_all_ack');
+    }
+  });
 }
 
-async function renameNode() {
+async function renameNode(btn) {
   const status = document.getElementById('renameStatus');
-  if (!selectedNode) { status.textContent = 'select a computer first'; return; }
+  if (!selectedNode) { status.textContent = t('msg_select_computer_first_short'); return; }
   const newId = document.getElementById('renameNodeInput').value.trim();
-  if (!newId) { status.textContent = 'enter a new id first'; return; }
+  if (!newId) { status.textContent = t('msg_enter_new_id'); return; }
   const oldId = selectedNode;
-  status.textContent = `renaming ${oldId} -> ${newId} and rebooting...`;
-  const { id } = await postCommand({ type: 'rename', node: oldId, newId });
-  const result = await awaitResult(id);
-  if (!result) {
-    status.textContent = 'no response yet - it may already be rebooting (check the table below in a moment)';
-  } else if (result.error) {
-    status.textContent = 'error: ' + result.error;
-  } else {
-    status.textContent = `${oldId} is now ${newId} and rebooting - it will reappear below under its new id once fleetbridge starts polling again`;
-    document.getElementById('renameNodeInput').value = '';
-    selectNode(newId); // switch Terminal/Remote files to follow it under the new id
-  }
+  status.textContent = tf('msg_renaming', { old: oldId, new: newId });
+  await withStatus(status, btn, async () => {
+    const { id } = await postCommand({ type: 'rename', node: oldId, newId });
+    const result = await awaitResult(id);
+    if (!result) {
+      status.textContent = t('msg_no_response_rebooting_table');
+    } else if (result.error) {
+      status.textContent = t('msg_error_prefix') + result.error;
+    } else {
+      status.textContent = tf('msg_renamed_ok', { old: oldId, new: newId });
+      document.getElementById('renameNodeInput').value = '';
+      selectNode(newId); // switch Terminal/Explorer to follow it under the new id
+    }
+  });
 }
 
-// ---- Local apps: edit-on-PC + create/run/kill/deploy ----
+// ---- Compute scripts (windows/compute/<name>.py, run on THIS PC - not
+// tied to any node). New scripts (and new apps, above in the Explorer) are
+// created by dragging a file in - see compute_scripts_desc. ----
 
-async function loadApps() {
-  const res = await apiFetch('/apps');
-  const data = await res.json();
-  const table = document.getElementById('appsTable');
-  table.innerHTML = '<tr><th>App</th><th>Target</th><th colspan="4"></th></tr>';
-  for (const group of (data.groups || [])) {
-    const groupTr = document.createElement('tr');
-    groupTr.innerHTML = `<td colspan="6" style="color:var(--text-dim);text-transform:uppercase;font-size:11px;padding-top:14px;border-bottom:none">${group.name}</td>`;
-    table.appendChild(groupTr);
-    for (const name of group.apps) appendAppRow(table, name);
+async function loadComputeScripts() {
+  let data;
+  try {
+    const res = await apiFetch('/compute_scripts');
+    data = await res.json();
+  } catch (err) {
+    console.error('loadComputeScripts failed:', err.message);
+    return;
   }
-  refreshNodeDropdowns();
+  const table = document.getElementById('computeTable');
+  table.innerHTML = `<tr><th>${t('col_script')}</th><th colspan="2"></th></tr>`;
+  for (const name of (data.names || [])) appendComputeRow(table, name);
 }
 
-function appendAppRow(table, name) {
-  const targetId = 'target_' + name;
+function appendComputeRow(table, name) {
   const tr = document.createElement('tr');
-  tr.innerHTML = `<td>${name}</td>
-    <td><select id="${targetId}" class="node-target-select"></select></td>
-    <td><button class="secondary" onclick="toggleEditor('${name}')">Edit</button></td>
-    <td><button class="secondary" onclick="runApp('${name}', '${targetId}')">Run</button></td>
-    <td><button class="secondary" onclick="killApp('${name}', '${targetId}')">Kill</button></td>
-    <td><button onclick="deployApp('${name}', '${targetId}')">Deploy</button></td>`;
+  tr.innerHTML = `<td>${name}.py</td>
+    <td><button class="secondary" onclick="toggleComputeEditor('${name}')">${t('btn_edit')}</button></td>
+    <td><button onclick="runComputeScript('${name}', this)">${t('btn_run')}</button></td>`;
   table.appendChild(tr);
 
   const editorTr = document.createElement('tr');
-  editorTr.innerHTML = `<td colspan="6">
-    <div class="editor" id="editor_${name}">
-      <textarea id="src_${name}"></textarea>
+  editorTr.innerHTML = `<td colspan="3">
+    <div class="editor" id="computeEditor_${name}">
+      <textarea id="computeSrc_${name}"></textarea>
       <div class="row">
-        <button class="secondary" onclick="saveApp('${name}')">Save to PC</button>
-        <button onclick="deployApp('${name}', '${targetId}')">Save + Deploy</button>
-        <span id="editorStatus_${name}" class="sub"></span>
+        <button class="secondary" onclick="saveComputeScript('${name}')">${t('btn_save_to_pc')}</button>
+        <span id="computeEditorStatus_${name}" class="sub"></span>
       </div>
+      <div class="sub" style="margin-top:8px">${t('test_input_label')}</div>
+      <textarea id="computeInput_${name}" style="height:70px" placeholder="{}"></textarea>
+      <div class="row">
+        <button onclick="runComputeScript('${name}', this)">${t('btn_run_with_input')}</button>
+        <span id="computeRunStatus_${name}" class="sub"></span>
+      </div>
+      <pre id="computeOutput_${name}" style="white-space:pre-wrap"></pre>
     </div>
   </td>`;
   table.appendChild(editorTr);
 }
 
-function runApp(name, targetId) {
-  const node = document.getElementById(targetId).value;
-  postCommand({ type: 'run', node, app: name });
-}
-
-function killApp(name, targetId) {
-  const node = document.getElementById(targetId).value;
-  postCommand({ type: 'kill', node, app: name });
-}
-
-async function createApp() {
-  const name = document.getElementById('newAppName').value.trim();
-  const group = document.getElementById('newAppGroup').value;
-  const content = document.getElementById('newAppContent').value;
-  const status = document.getElementById('newAppStatus');
-  if (!name) { status.textContent = 'name required'; return; }
-  status.textContent = 'creating...';
-  const res = await apiFetch('/apps', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, group, content }),
-  });
-  const data = await res.json();
-  if (!res.ok) { status.textContent = 'error: ' + (data.error || res.status); return; }
-  status.textContent = 'created ' + name + ' - Deploy it below to push to a computer';
-  document.getElementById('newAppName').value = '';
-  document.getElementById('newAppContent').value = '';
-  await loadApps();
-}
-
-async function toggleEditor(name) {
-  const el = document.getElementById('editor_' + name);
+async function toggleComputeEditor(name) {
+  const el = document.getElementById('computeEditor_' + name);
   const isOpen = el.classList.contains('open');
   if (isOpen) { el.classList.remove('open'); return; }
-  const res = await apiFetch('/apps/' + name + '.lua');
-  document.getElementById('src_' + name).value = await res.text();
-  el.classList.add('open');
+  const status = document.getElementById('computeEditorStatus_' + name);
+  try {
+    const res = await apiFetch('/compute_scripts/' + name);
+    document.getElementById('computeSrc_' + name).value = await res.text();
+    el.classList.add('open');
+  } catch (err) {
+    status.textContent = t('msg_error_prefix') + err.message;
+  }
 }
 
-async function saveApp(name) {
-  const content = document.getElementById('src_' + name).value;
-  await apiFetch('/apps/' + name + '.lua', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ content }),
+async function saveComputeScript(name) {
+  const content = document.getElementById('computeSrc_' + name).value;
+  const status = document.getElementById('computeEditorStatus_' + name);
+  await withStatus(status, null, async () => {
+    await apiFetch('/compute_scripts/' + name, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content }),
+    });
+    status.textContent = tf('msg_saved_py_at', { time: new Date().toLocaleTimeString() });
   });
-  document.getElementById('editorStatus_' + name).textContent = 'saved to PC ' + new Date().toLocaleTimeString();
+}
+
+// Not tied to a node - /compute/<name> always runs on THIS PC, so unlike
+// runApp/killApp there's no target select here.
+// Renders a compute script's JSON result as a readable key: value list
+// instead of always dumping raw JSON - an {error: "..."} shows in red, a
+// flat-ish object gets one row per field, anything else (array, plain
+// string/number) falls back to pretty JSON. A "raw JSON" link always lets
+// you see the exact wire response underneath, for debugging a new script.
+function renderComputeResult(el, result) {
+  el.innerHTML = '';
+  el.className = '';
+
+  const showRaw = () => {
+    el.innerHTML = '';
+    const pre = document.createElement('pre');
+    pre.style.whiteSpace = 'pre-wrap';
+    pre.textContent = JSON.stringify(result, null, 2);
+    el.appendChild(pre);
+  };
+
+  const keys = (result && typeof result === 'object' && !Array.isArray(result)) ? Object.keys(result) : null;
+
+  if (keys && 'error' in result) {
+    const div = document.createElement('div');
+    div.style.color = 'var(--red)';
+    div.textContent = t('msg_error_prefix') + result.error;
+    el.appendChild(div);
+  } else if (keys && keys.length === 1 && keys[0] === 'output' && typeof result.output === 'string') {
+    // bridge_server.py wraps a compute script's non-JSON stdout as
+    // {"output": "<raw text>"} - showing that as a one-row key:value table
+    // would be silly, just show the text itself.
+    const pre = document.createElement('pre');
+    pre.style.whiteSpace = 'pre-wrap';
+    pre.textContent = result.output;
+    el.appendChild(pre);
+  } else if (keys) {
+    const table = document.createElement('table');
+    for (const key of Object.keys(result)) {
+      const v = result[key];
+      const tr = document.createElement('tr');
+      const tdK = document.createElement('td');
+      tdK.style.color = 'var(--text-dim)'; tdK.style.width = '30%';
+      tdK.textContent = key;
+      const tdV = document.createElement('td');
+      tdV.textContent = (v !== null && typeof v === 'object') ? JSON.stringify(v) : String(v);
+      tr.append(tdK, tdV);
+      table.appendChild(tr);
+    }
+    el.appendChild(table);
+  } else {
+    showRaw();
+    return; // already raw, no need for the toggle link below
+  }
+
+  const toggle = document.createElement('a');
+  toggle.className = 'raw-json-toggle';
+  toggle.textContent = t('btn_raw_json');
+  toggle.onclick = showRaw;
+  el.appendChild(document.createElement('br'));
+  el.appendChild(toggle);
+}
+
+async function runComputeScript(name, btn) {
+  document.getElementById('computeEditor_' + name).classList.add('open');
+  const inputEl = document.getElementById('computeInput_' + name);
+  const outputEl = document.getElementById('computeOutput_' + name);
+  const status = document.getElementById('computeRunStatus_' + name);
+  let body;
+  try {
+    body = JSON.parse(inputEl.value || '{}');
+  } catch (err) {
+    status.textContent = tf('msg_invalid_json', { err: err.message });
+    return;
+  }
+  await withStatus(status, btn, async () => {
+    const res = await apiFetch('/compute/' + name, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }, 35000);
+    renderComputeResult(outputEl, await res.json());
+    status.textContent = tf('msg_ran_at', { time: new Date().toLocaleTimeString() });
+  });
 }
 
 // Some apps dofile() a shared top-level module that isn't one of apps/*,
@@ -494,77 +1813,305 @@ async function deployAndRun(name, node) {
   await postCommand({ type: 'run', node, app: name });
 }
 
-async function deployApp(name, targetInputId) {
-  const editorOpen = document.getElementById('editor_' + name)?.classList.contains('open');
-  if (editorOpen) await saveApp(name); // persist edits before deploying
-  const target = document.getElementById(targetInputId).value || '*';
-  await deployAndRun(name, target);
-}
-
-// ---- Macros ----
-
-const MACROS = {
-  'Redeploy fleetbridge': ['fleetbridge'],
-  'Deploy raytower master': ['raytower_master'],
-  'Deploy raytower slave': ['raytower_slave'],
-};
-
-function renderMacros() {
-  const row = document.getElementById('macrosRow');
-  for (const name in MACROS) {
-    const btn = document.createElement('button');
-    btn.textContent = name;
-    btn.onclick = () => runMacro(name);
-    row.appendChild(btn);
-  }
-}
-
-async function runMacro(name) {
-  const target = document.getElementById('macroTarget').value || '*';
-  for (const app of MACROS[name]) {
-    await deployAndRun(app, target);
-  }
-}
-
 // ---- Status polling (also drives the terminal view) ----
 
-function appsSummary(apps) {
-  return (apps || []).map(entry => {
-    const [name, status] = entry.split(':');
-    return `<span class="${statusClass(status)}">${name} (${status})</span>`;
-  }).join(' &nbsp; ');
+// Builds a DOM fragment (not an HTML string) for the app/status list, since
+// `apps` ultimately comes from a node's own /report - a node id, role, or
+// app/status string a client controls end up here, and innerHTML on
+// attacker-influenced text would be a stored-XSS vector for anyone else
+// viewing this dashboard. textContent/createElement never interpret markup.
+function appsSummaryFragment(apps, appVersions) {
+  const frag = document.createDocumentFragment();
+  (apps || []).forEach((entry, i) => {
+    if (i > 0) frag.appendChild(document.createTextNode('  '));
+    const sep = entry.indexOf(':');
+    const name = sep === -1 ? entry : entry.slice(0, sep);
+    const status = sep === -1 ? '' : entry.slice(sep + 1);
+    const span = document.createElement('span');
+    span.className = statusClass(status);
+    span.textContent = `${name} (${status})`;
+    // a short content-checksum tooltip - lets an admin spot "this node
+    // is running different code than the rest of the fleet" (a deploy that
+    // missed a flaky node, etc.) at a glance, without diffing files by hand.
+    if (appVersions && appVersions[name]) span.title = 'version: ' + appVersions[name];
+    frag.appendChild(span);
+  });
+  return frag;
+}
+
+// ---- Fleet folders (dashboard-side node organization, persisted
+// server-side in bridge_server.py's node_meta.json via /node_folder -
+// purely organizational, no node ever needs to know its own folder) ----
+
+let collapsedFolders = new Set(JSON.parse(localStorage.getItem('fleetCollapsedFolders') || '[]'));
+function saveCollapsedFolders() { localStorage.setItem('fleetCollapsedFolders', JSON.stringify([...collapsedFolders])); }
+
+// Deterministic color per folder name (same folder always gets the same
+// hue) - used for both the fleet table's swatch and the map's dots/legend.
+function folderColor(name) {
+  if (!name) return '#8a9280';
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
+  return `hsl(${hash % 360}, 60%, 55%)`;
+}
+
+function formatPos(pos) {
+  if (!pos) return t('pos_unknown');
+  const r = (n) => Math.round(n * 10) / 10;
+  return `${r(pos.x)}, ${r(pos.y)}, ${r(pos.z)}`;
+}
+
+async function setNodeFolder(id, folder) {
+  await apiFetch('/node_folder', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ node: id, folder }),
+  });
+  await refreshStatus();
+}
+
+function nodeFolderSelect(id, currentFolder, allFolders) {
+  const select = document.createElement('select');
+  const noneOpt = document.createElement('option');
+  noneOpt.value = '__none__'; noneOpt.textContent = t('opt_no_folder');
+  if (!currentFolder) noneOpt.selected = true;
+  select.appendChild(noneOpt);
+  for (const f of allFolders) {
+    const opt = document.createElement('option');
+    opt.value = f; opt.textContent = f;
+    if (f === currentFolder) opt.selected = true;
+    select.appendChild(opt);
+  }
+  const newOpt = document.createElement('option');
+  newOpt.value = '__new__'; newOpt.textContent = t('opt_new_folder');
+  select.appendChild(newOpt);
+  select.onclick = (ev) => ev.stopPropagation(); // don't also trigger the row's own selectNode
+  select.onchange = () => {
+    if (select.value === '__new__') {
+      const name = (prompt(t('prompt_new_folder_name')) || '').trim();
+      if (name) setNodeFolder(id, name); else select.value = currentFolder || '__none__';
+      return;
+    }
+    setNodeFolder(id, select.value === '__none__' ? '' : select.value);
+  };
+  return select;
+}
+
+async function folderRename(oldName, ids) {
+  const name = (prompt(tf('prompt_rename_folder', { folder: oldName }), oldName) || '').trim();
+  if (!name || name === oldName) return;
+  for (const id of ids) await setNodeFolder(id, name);
+}
+
+async function folderUngroup(ids) {
+  for (const id of ids) await setNodeFolder(id, '');
+}
+
+// ---- Bulk actions (checkbox-based, cross-folder) - the actual "make
+// mass actions possible" answer: pick any set of computers regardless of
+// which folder(s) they're in, then move/update/run/kill across all of
+// them at once. ----
+
+let checkedNodeIds = new Set();
+let lastKnownNodes = {}; // last /status nodes dict, kept for bulk helpers that need `.folder`
+
+function toggleNodeChecked(id, checked) {
+  if (checked) checkedNodeIds.add(id); else checkedNodeIds.delete(id);
+  updateBulkBar();
+  document.getElementById('fleetSelectAll').checked = knownNodeIds.length > 0 && checkedNodeIds.size === knownNodeIds.length;
+}
+
+function toggleSelectAll(cb) {
+  checkedNodeIds = cb.checked ? new Set(knownNodeIds) : new Set();
+  refreshStatus();
+}
+
+function updateBulkBar() {
+  const bar = document.getElementById('fleetBulkBar');
+  if (checkedNodeIds.size === 0) { bar.style.display = 'none'; return; }
+  bar.style.display = 'flex';
+  document.getElementById('fleetBulkCount').textContent = tf('bulk_selected_count', { n: checkedNodeIds.size });
+}
+
+function refreshBulkFolderOptions(allFolders) {
+  const select = document.getElementById('fleetBulkFolder');
+  const prevValue = select.value;
+  select.innerHTML = '';
+  const noneOpt = document.createElement('option');
+  noneOpt.value = '__none__'; noneOpt.textContent = t('opt_no_folder');
+  select.appendChild(noneOpt);
+  for (const f of allFolders) {
+    const opt = document.createElement('option');
+    opt.value = f; opt.textContent = f;
+    select.appendChild(opt);
+  }
+  const newOpt = document.createElement('option');
+  newOpt.value = '__new__'; newOpt.textContent = t('opt_new_folder');
+  select.appendChild(newOpt);
+  if ([...select.options].some(o => o.value === prevValue)) select.value = prevValue;
+}
+
+async function bulkAssignFolder() {
+  const select = document.getElementById('fleetBulkFolder');
+  let folder = select.value;
+  if (folder === '__new__') {
+    folder = (prompt(t('prompt_new_folder_name')) || '').trim();
+    if (!folder) return;
+  } else if (folder === '__none__') {
+    folder = '';
+  }
+  for (const id of checkedNodeIds) await setNodeFolder(id, folder);
+}
+
+async function bulkRunApp(btn) {
+  const app = document.getElementById('fleetBulkAppName').value.trim();
+  if (!app) return;
+  // fired instantly on every checked node before this existed - a
+  // misclick (or forgetting which nodes were still checked from a previous
+  // action) ran an app fleet-wide with no way to undo it.
+  if (!confirm(`Run '${app}' on ${checkedNodeIds.length} node(s)?`)) return;
+  await withStatus(null, btn, async () => {
+    for (const id of checkedNodeIds) await postCommand({ type: 'run', node: id, app });
+  });
+}
+
+async function bulkKillApp(btn) {
+  const app = document.getElementById('fleetBulkAppName').value.trim();
+  if (!app) return;
+  if (!confirm(`Kill '${app}' on ${checkedNodeIds.length} node(s)?`)) return;
+  await withStatus(null, btn, async () => {
+    for (const id of checkedNodeIds) await postCommand({ type: 'kill', node: id, app });
+  });
 }
 
 async function refreshStatus() {
-  const res = await apiFetch('/status');
-  const data = await res.json();
+  let data;
+  try {
+    const res = await apiFetch('/status');
+    data = await res.json();
+  } catch (err) {
+    const pill = document.getElementById('pingPill');
+    pill.textContent = err.message;
+    pill.className = 'pill stale';
+    return;
+  }
   const nodes = data.nodes || {};
   const nodeIds = Object.keys(nodes).sort();
   knownNodeIds = nodeIds;
+  lastKnownNodes = nodes; // {id: {folder, latest_report, seconds_since_report}} - read by bulk-action helpers
 
   // auto-select the only node, or drop a selection that no longer exists
   if (!selectedNode && nodeIds.length === 1) selectNode(nodeIds[0]);
   if (selectedNode && !nodeIds.includes(selectedNode)) { selectedNode = null; updateTargetLabels(); }
   refreshNodeDropdowns();
+  document.getElementById('selectedNodeLabel').textContent = selectedNode ? `(${selectedNode})` : `(${t('msg_select_computer_first_short')})`;
+
+  // Drop checkboxes for nodes that no longer exist, so a stale id can't
+  // silently linger in a bulk action's target set.
+  checkedNodeIds = new Set([...checkedNodeIds].filter(id => nodeIds.includes(id)));
 
   const nodesTable = document.getElementById('nodesTable');
-  nodesTable.innerHTML = '<tr><th>Node</th><th>Role</th><th>Apps</th><th>Last report</th></tr>';
+  nodesTable.innerHTML = `<tr><th><input type="checkbox" id="fleetSelectAll" onclick="toggleSelectAll(this)"></th><th>${t('col_node')}</th><th>${t('col_role')}</th><th>${t('col_pos')}</th><th>${t('col_apps')}</th><th>${t('col_last_report')}</th><th>${t('col_folder')}</th></tr>`;
+  document.getElementById('fleetSelectAll').checked = nodeIds.length > 0 && checkedNodeIds.size === nodeIds.length;
+
+  const allFolders = [...new Set(nodeIds.map(id => nodes[id].folder).filter(Boolean))].sort();
+  refreshBulkFolderOptions(allFolders);
+  const groups = new Map(); // folder name ("" = unassigned) -> [ids]
   for (const id of nodeIds) {
-    const n = nodes[id];
-    const age = n.seconds_since_report;
-    const pillClass = age == null ? 'stale' : (age > 10 ? 'stale' : 'ok');
-    const pillText = age == null ? 'no report yet' : `${age.toFixed(1)}s ago`;
-    const report = n.latest_report || {};
-    const tr = document.createElement('tr');
-    if (id === selectedNode) tr.style.color = 'var(--amber)';
-    tr.innerHTML = `<td>${id}</td><td>${report.role || '?'}</td><td>${appsSummary(report.apps)}</td>
-      <td><span class="pill ${pillClass}">${pillText}</span></td>`;
-    nodesTable.appendChild(tr);
+    const f = nodes[id].folder || '';
+    if (!groups.has(f)) groups.set(f, []);
+    groups.get(f).push(id);
   }
+  const orderedFolderNames = [...groups.keys()].filter(f => f).sort();
+  if (groups.has('')) orderedFolderNames.push(''); // unassigned nodes shown last
+
+  for (const folderName of orderedFolderNames) {
+    const ids = groups.get(folderName);
+    const tbody = document.createElement('tbody');
+    tbody.className = 'folder-group';
+    tbody.style.setProperty('--folder-color', folderColor(folderName));
+    const collapseKey = folderName || ' unassigned';
+    if (collapsedFolders.has(collapseKey)) tbody.classList.add('collapsed');
+
+    const headerTr = document.createElement('tr');
+    headerTr.className = 'folder-header';
+    const headerTd = document.createElement('td');
+    headerTd.colSpan = 7;
+    const caret = document.createElement('span');
+    caret.className = 'folder-caret';
+    caret.textContent = collapsedFolders.has(collapseKey) ? '▸' : '▾';
+    const label = document.createElement('span');
+    label.textContent = ' ' + (folderName || t('opt_no_folder')) + ` (${ids.length})`;
+    headerTd.append(caret, label);
+    headerTd.onclick = (ev) => {
+      if (ev.target.tagName === 'BUTTON') return;
+      if (collapsedFolders.has(collapseKey)) collapsedFolders.delete(collapseKey); else collapsedFolders.add(collapseKey);
+      saveCollapsedFolders();
+      refreshStatus();
+    };
+    if (folderName) {
+      const renameBtn = document.createElement('button');
+      renameBtn.className = 'secondary'; renameBtn.style.marginLeft = '10px';
+      renameBtn.textContent = t('folder_rename');
+      renameBtn.onclick = (ev) => { ev.stopPropagation(); folderRename(folderName, ids); };
+      const ungroupBtn = document.createElement('button');
+      ungroupBtn.className = 'secondary'; ungroupBtn.style.marginLeft = '6px';
+      ungroupBtn.textContent = t('folder_ungroup');
+      ungroupBtn.onclick = (ev) => { ev.stopPropagation(); folderUngroup(ids); };
+      headerTd.append(renameBtn, ungroupBtn);
+    }
+    headerTr.appendChild(headerTd);
+    tbody.appendChild(headerTr);
+
+    for (const id of ids) {
+      const n = nodes[id];
+      const age = n.seconds_since_report;
+      const pillClass = age == null ? 'stale' : (age > 10 ? 'stale' : 'ok');
+      const pillText = age == null ? t('ping_no_report') : `${age.toFixed(1)}s ago`;
+      const report = n.latest_report || {};
+      const tr = document.createElement('tr');
+      tr.style.cursor = 'pointer';
+      tr.onclick = () => selectNode(id);
+      if (id === selectedNode) tr.style.color = 'var(--amber)';
+
+      const tdCheck = document.createElement('td');
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = checkedNodeIds.has(id);
+      cb.onclick = (ev) => { ev.stopPropagation(); toggleNodeChecked(id, cb.checked); };
+      tdCheck.appendChild(cb);
+
+      const tdId = document.createElement('td'); tdId.textContent = id;
+      const tdRole = document.createElement('td'); tdRole.textContent = report.role || '?';
+      // config.lua's own bridgeUrl/startup fields can silently drift out
+      // of sync with what's actually in effect (bridge_override.txt/
+      // startup_override.txt are never merged back into config.lua's
+      // source, to avoid clobbering an admin's own comments/formatting).
+      // Surface that divergence instead of hiding it.
+      if (report.effectiveConfig && report.effectiveConfig.startup) {
+        tdRole.title = 'startup override active (differs from config.lua): ' + report.effectiveConfig.startup.join(', ');
+        tdRole.textContent += ' *';
+      }
+      const tdPos = document.createElement('td'); tdPos.textContent = formatPos(report.pos);
+      const tdApps = document.createElement('td'); tdApps.appendChild(appsSummaryFragment(report.apps, report.appVersions));
+      const tdPill = document.createElement('td');
+      const pillSpan = document.createElement('span');
+      pillSpan.className = 'pill ' + pillClass;
+      pillSpan.textContent = pillText;
+      tdPill.appendChild(pillSpan);
+      const tdFolder = document.createElement('td');
+      tdFolder.appendChild(nodeFolderSelect(id, n.folder || '', allFolders));
+
+      tr.append(tdCheck, tdId, tdRole, tdPos, tdApps, tdPill, tdFolder);
+      tbody.appendChild(tr);
+    }
+    nodesTable.appendChild(tbody);
+  }
+
+  updateBulkBar();
 
   const pill = document.getElementById('pingPill');
   if (!selectedNode) {
-    pill.textContent = nodeIds.length ? 'select a computer below' : 'no computers seen yet';
+    pill.textContent = nodeIds.length ? t('ping_select_below') : t('ping_no_computers');
     pill.className = 'pill stale';
     return;
   }
@@ -572,22 +2119,39 @@ async function refreshStatus() {
   const selected = nodes[selectedNode];
   const age = selected && selected.seconds_since_report;
   if (age == null) {
-    pill.textContent = `${selectedNode}: no report yet`;
+    pill.textContent = `${selectedNode}: ${t('ping_no_report')}`;
     pill.className = 'pill stale';
   } else {
-    pill.textContent = `${selectedNode}: last report ${age.toFixed(1)}s ago`;
+    pill.textContent = `${selectedNode}: ${age.toFixed(1)}s ago`;
     pill.className = 'pill ' + (age > 10 ? 'stale' : 'ok');
   }
 
   const report = selected && selected.latest_report;
   if (report) renderTerminal(report.output);
+  renderMonitor(report && report.monitor);
 }
 
 updateTargetLabels();
-loadApps();
-renderMacros();
+updateScreenTabUI();
+loadComputeScripts();
+// Adaptive polling: fast (POLL_FAST) for a short window after any command
+// so a run/kill/monitor_touch shows up on the site almost immediately,
+// decaying back to the slow idle rate (POLL_SLOW) so an untouched dashboard
+// doesn't hammer the bridge for no reason.
+const POLL_FAST = 250;
+const POLL_SLOW = 1000;
+const POLL_ACTIVE_MS = 6000;
+let lastCommandAt = 0;
+function scheduleNextPoll() {
+  const active = Date.now() - lastCommandAt < POLL_ACTIVE_MS;
+  setTimeout(async () => {
+    await refreshStatus();
+    scheduleNextPoll();
+  }, active ? POLL_FAST : POLL_SLOW);
+}
+
 refreshStatus();
-setInterval(refreshStatus, 2000);
+scheduleNextPoll();
 </script>
 </body>
 </html>
