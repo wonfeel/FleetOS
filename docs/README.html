@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FleetOS - документация</title>
+<style>
+  :root{
+    --bg: #0c0f0d; --panel: #12160f; --panel-2: #171c14; --line: #2a3324;
+    --amber: #ffb300; --amber-dim: #a87400; --text: #d8dccb; --text-dim: #8a9280;
+    --green: #5fd97a; --red: #ff6b5e; --cyan: #6fd3d9; --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  }
+  *{box-sizing:border-box;}
+  body{ background:var(--bg); color:var(--text); font-family:var(--mono); font-size:14px; margin:0; padding:0 20px 60px; line-height:1.55; }
+  .wrap{ max-width:920px; margin:0 auto; }
+  h1{ color:var(--amber); font-size:26px; margin:28px 0 4px; }
+  .sub{ color:var(--text-dim); font-size:13px; margin-bottom:20px; }
+  h2{ color:var(--amber); font-size:18px; margin:0 0 12px; border-bottom:1px solid var(--line); padding-bottom:8px; }
+  section{ background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:18px 22px; margin-bottom:16px; }
+  code{ font-family:var(--mono); background:var(--panel-2); border:1px solid var(--line); border-radius:3px; padding:1px 5px; color:var(--green); font-size:13px; }
+  a{ color:var(--amber); }
+  table{ width:100%; border-collapse:collapse; font-size:13px; margin:10px 0; }
+  th,td{ text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th{ color:var(--text-dim); font-weight:400; text-transform:uppercase; font-size:11px; }
+  ul{ padding-left:22px; }
+  li{ margin-bottom:6px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>FleetOS - документация</h1>
+  <div class="sub">Индекс всего, что лежит в <code>docs/</code>. Английская краткая версия - в <a href="../README.md">корневом README.md</a>.</div>
+
+  <section id="start">
+    <h2>С чего начать</h2>
+    <table>
+      <tr><th>Файл</th><th>Зачем</th></tr>
+      <tr><td><a href="quickstart.html">quickstart.html</a></td><td>4 шага: поднять мост, поставить на первый компьютер. Начните отсюда.</td></tr>
+      <tr><td><a href="fleetos_guide.html">fleetos_guide.html</a></td><td>Полный гайд: мост, установка, дашборд, API-ключ, <code>fleetctl.py</code>, разбор проблем.</td></tr>
+      <tr><td><a href="hardening_guide.html">hardening_guide.html</a></td><td>Админ/безопасность: read-only ключ, <code>/health</code>/<code>/metrics</code>, бэкап флота, откат ядра, подпись Raytower, свежие правки эмуляции.</td></tr>
+      <tr><td><a href="guide.html">guide.html</a></td><td>Отдельный гайд именно по триангуляции вышек (Raytower): калибровка, <code>raytower.lua</code>.</td></tr>
+    </table>
+  </section>
+
+  <section id="tech">
+    <h2>Техническая документация</h2>
+    <table>
+      <tr><th>Файл</th><th>Зачем</th></tr>
+      <tr><td><a href="ARCHITECTURE_GATEWAY_CLUSTER.html">ARCHITECTURE_GATEWAY_CLUSTER.html</a></td><td>Кластер шлюзов с выбором лидера (реализовано: <code>fleetgateway.lua</code>), снижает нагрузку на мост и переживает временную недоступность прямого HTTP-пути отдельной ноды.</td></tr>
+    </table>
+  </section>
+
+  <section id="related">
+    <h2>Смежное</h2>
+    <ul>
+      <li>Разработка своих приложений под ядро - <a href="../game/apps/README.md"><code>../game/apps/README.md</code></a>.</li>
+      <li>Спецификация HTTP API моста - <a href="../windows/openapi.yaml"><code>../windows/openapi.yaml</code></a>.</li>
+      <li>Конфиги статического анализа - <code>../.luacheckrc</code> (Lua), <code>../windows/setup.cfg</code> (Python).</li>
+    </ul>
+  </section>
+</div>
+</body>
+</html>

@@ -1,53 +1,27 @@
--- keyed message authentication + replay protection for raytower's
--- rednet traffic, which previously went out as plain
--- rednet.broadcast/send with zero signing - any player with a modem in
--- range could forge a fake tower report (spoofing the solved position) or
--- send bogus "poll" messages.
+-- keyed message authentication + replay protection for rednet traffic.
+-- Originally built for apps/raytower/*.lua's rednet.broadcast/send (which
+-- previously went out unsigned - any player with a modem in range could
+-- forge a fake tower report or send bogus "poll" messages), then promoted
+-- here (no raytower-specific dependencies) once a second feature
+-- (apps/common/fleetgateway.lua's leader-election + relay traffic) needed
+-- the exact same thing.
 --
--- HONEST SCOPE NOTE: this is NOT HMAC-SHA256/a cryptographically
--- collision-resistant MAC - CC:Tweaked's Lua (Cobalt, Lua 5.1 semantics)
--- has no bitwise operators or bit32 library to build a real SHA-2 on top
--- of without pulling in a large third-party pure-Lua crypto library.
--- Instead this implements a keyed FNV-1a-based MAC (bxor emulated via pure
--- arithmetic - +,-,*,/,%, no bit library needed) plus a timestamp freshness
--- window. This stops a CASUAL spoofer (a player who doesn't know the shared
--- secret trying to inject/replay packets) - it is NOT proof against a
--- determined cryptanalytic attacker. If raytowerSecret is left unset, this
--- silently no-ops back to the historical unsigned behavior (documented,
+-- This is a real HMAC-SHA256 (apps/common/_sha256.lua), not a home-grown
+-- MAC - an earlier version of this file used a keyed FNV-1a construction
+-- instead, on the belief that CC:Tweaked's Lua had no bitwise operators or
+-- bit32 library to build real SHA-2 on top of. That belief was wrong: CC:
+-- Tweaked's bios.lua exposes a `bit` global (band/bor/bxor/bnot/blshift/
+-- blogic_rshift) for exactly this kind of thing, confirmed directly against
+-- the current cc-tweaked/CC-Tweaked source. See _sha256.lua's own header
+-- for the verification/test-vector details. If the caller's secret is left
+-- unset (""), this silently no-ops back to unsigned behavior (documented,
 -- backward compatible - existing fleets aren't broken by upgrading).
 
 local M = {}
 
--- Pure-arithmetic 32-bit XOR (no bit32/bit library assumed - see header).
--- Classic bit-by-bit technique: peel off each operand's low bit via % 2,
--- compare, accumulate into the result at the current power-of-two place.
-local function bxor32(a, b)
-    local result, bitval = 0, 1
-    a = a % 4294967296
-    b = b % 4294967296
-    while a > 0 or b > 0 do
-        local abit, bbit = a % 2, b % 2
-        if abit ~= bbit then result = result + bitval end
-        a = (a - abit) / 2
-        b = (b - bbit) / 2
-        bitval = bitval * 2
-    end
-    return result
-end
-
-local FNV_PRIME = 16777619
-local FNV_OFFSET = 2166136261
-
--- 32-bit FNV-1a over a string - fast, simple, well-distributed, but NOT
--- cryptographically secure (no claim otherwise - see header).
-local function fnv1a(str)
-    local hash = FNV_OFFSET
-    for i = 1, #str do
-        hash = bxor32(hash, str:byte(i))
-        hash = (hash * FNV_PRIME) % 4294967296
-    end
-    return hash
-end
+-- Same "apps/common/<name>.lua" path convention every caller already uses
+-- to dofile() THIS file, since _sha256.lua lives right next to it.
+local Sha256 = dofile("apps/common/_sha256.lua")
 
 -- Bug fix: this used to hash textutils.serialize(payload) directly - but
 -- Lua's pairs() iteration order for a table depends on its internal hash
@@ -79,18 +53,12 @@ local function canonicalize(value)
     return tostring(value)
 end
 
--- Keyed MAC: two rounds of FNV-1a with the secret mixed in on both sides of
--- each round (secret-prefix AND suffix, not just prefix) - cheap insurance
--- against the kind of length-extension weakness a single prefix-only MAC
--- over a Merkle-Damgard-style hash could have (FNV isn't Merkle-Damgard, so
--- this mostly isn't applicable here, but doubling the mixing costs nothing).
+-- Real HMAC-SHA256 (RFC 2104), via apps/common/_sha256.lua.
 local function mac(secret, message)
-    local round1 = fnv1a(secret .. "\0" .. message .. "\0" .. secret)
-    local round2 = fnv1a(secret .. "\0" .. tostring(round1) .. "\0" .. message)
-    return ("%08x%08x"):format(round1, round2)
+    return Sha256.hmacSha256(secret, message)
 end
 
--- Exposed mainly for test/test_raytower_auth.lua to construct exact
+-- Exposed mainly for test/test_signed_rednet.lua to construct exact
 -- scenarios (e.g. a validly-signed-but-stale packet) that M.sign()'s
 -- always-use-current-time behavior can't produce directly. Not a security
 -- concern to expose - knowing the hash function doesn't help forge a MAC
@@ -111,14 +79,13 @@ function M.sign(payload, secret)
 end
 
 -- Verifies a received payload. Returns true, or false+reason. If `secret`
--- is "" (unset), always returns true (auth off) - a node with no secret
--- configured behaves exactly as before this existed, so upgrading
--- raytower_master.lua/raytower_slave.lua alone doesn't break a fleet that
--- hasn't set raytowerSecret in config.lua yet.
+-- is "" (unset), always returns true (auth off) - a caller with no secret
+-- configured behaves exactly as before this existed, so upgrading one side
+-- alone doesn't break a fleet that hasn't set a shared secret yet.
 function M.verify(payload, secret)
     if secret == "" then return true end
     if type(payload) ~= "table" or type(payload.mac) ~= "string" or type(payload.ts) ~= "number" then
-        return false, "missing mac/ts (sender has no raytowerSecret configured, or a forged/malformed packet)"
+        return false, "missing mac/ts (sender has no shared secret configured, or a forged/malformed packet)"
     end
     local receivedMac = payload.mac
     local copy = {}
@@ -127,7 +94,7 @@ function M.verify(payload, secret)
     end
     local expected = mac(secret, canonicalize(copy))
     if expected ~= receivedMac then
-        return false, "signature mismatch (wrong/missing raytowerSecret, or a forged packet)"
+        return false, "signature mismatch (wrong/missing shared secret, or a forged packet)"
     end
     local now = os.epoch("utc")
     if math.abs(now - payload.ts) > M.REPLAY_WINDOW_MS then

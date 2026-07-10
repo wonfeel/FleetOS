@@ -1,0 +1,79 @@
+# docker-compose.yml - runs bridge_server.py + dashboard the same way on
+# Windows/Mac/Linux: `docker compose up`. See Dockerfile for what this
+# does and doesn't cover (real Minecraft nodes talk to this over HTTP either
+# way - the Windows-only local dev emulation, windows/craftos_shim.lua, is
+# NOT part of this image and still needs a real Windows Lua install).
+#
+# Set a real key before exposing this beyond your own machine:
+#   FLEET_BRIDGE_KEY=something-secret docker compose up
+# (an unset key is fine for pure local use - see bridge_server.py's own
+# module docstring for the exact threat model either way).
+#
+# Isolation note (this is the actual answer to "run Python/C++ compute
+# scripts in an isolated environment", not a separate mechanism): running
+# THIS container at all is what isolates windows/compute/*.py - normally
+# (outside Docker) those run as a plain subprocess with the SAME OS
+# privileges as bridge_server.py itself - full filesystem/user access, no
+# containment whatsoever (see that code's own comment). Inside this
+# container, a compute script inherits the CONTAINER's constraints instead:
+# no access to the real host filesystem beyond what's explicitly mounted
+# below, and the cap_drop/security_opt/resource limits below apply to it
+# too, since it's a child process of this same container, not a separate
+# one. This is real, meaningful containment - NOT the same as a
+# purpose-built sandbox for untrusted third-party code (that would mean
+# launching a fresh, throwaway container per script invocation, which
+# needs access to the host's own Docker daemon from inside this one - a
+# real capability, and a real additional trust boundary of its own, not
+# implemented here since it couldn't be verified working without a Docker
+# install in the environment this was written in - flagging it as a
+# possible follow-up rather than shipping something unverified).
+#
+# A compiled C++ compute script (windows/compute/triangulation.cpp, if you
+# build it) needs to be compiled for LINUX to run in here, not Windows -
+# g++ -O2 -std=c++17 -o triangulation.exe triangulation.cpp on a Linux
+# machine (or via a multi-stage Docker build), not the Windows toolchain
+# command in that file's own header comment.
+
+services:
+  bridge:
+    build: .
+    ports:
+      - "8787:8787"
+    environment:
+      # Passed through from the shell that runs `docker compose up` -
+      # unset ones are simply absent inside the container, same as not
+      # setting them at all (bridge_server.py's own os.environ.get(...)
+      # defaults already handle that).
+      - FLEET_BRIDGE_KEY
+      - FLEET_BRIDGE_READONLY_KEY
+      - FLEET_ENABLE_COMPUTE
+      - FLEET_ENABLE_SIM_SPAWN
+      - FLEET_RATE_LIMIT_MAX_REQUESTS
+      - FLEET_TLS_CERT
+      - FLEET_TLS_KEY
+    volumes:
+      # State/logs persist across `docker compose down && up` instead of
+      # living only in the container's throwaway writable layer. Only the
+      # logs/ directory is safe to volume-mount wholesale here (it's
+      # created on demand by bridge_server.py, never read from at startup) -
+      # bridge_state.json/node_meta.json/bridge_key.txt are individual
+      # files, not directories, so Docker would create them as EMPTY
+      # DIRECTORIES on first run if volume-mounted the same way (a classic
+      # Docker footgun) - bind-mount those individually yourself if you
+      # want them to survive a container recreate; losing them otherwise
+      # only loses queued commands/folder assignments, not your fleet.
+      - fleetos-logs:/app/windows/logs
+    # Standard container-hardening knobs, all well past "experimental" in
+    # Docker Compose - constrain this container (and anything it spawns,
+    # including a compute script) well below a normal host process's
+    # privileges, regardless of what runs inside it.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    cpus: 1.0
+    restart: unless-stopped
+
+volumes:
+  fleetos-logs:

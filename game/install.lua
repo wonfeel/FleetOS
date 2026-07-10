@@ -1,3 +1,4 @@
+-- install.lua
 -- One-time bootstrap loader for a FRESH CC:Tweaked computer with nothing
 -- installed yet. Fetches fleetos.lua and the bare minimum apps
 -- (shell/fleetbridge) from your bridge_server.py, writes a starter

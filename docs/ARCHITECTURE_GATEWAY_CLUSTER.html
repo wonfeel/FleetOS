@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FleetOS, gateway cluster architecture</title>
+<style>
+  :root{
+    --bg: #0c0f0d; --panel: #12160f; --panel-2: #171c14; --line: #2a3324;
+    --amber: #ffb300; --amber-dim: #a87400; --text: #d8dccb; --text-dim: #8a9280;
+    --green: #5fd97a; --red: #ff6b5e; --cyan: #6fd3d9; --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  }
+  *{box-sizing:border-box;}
+  body{ background:var(--bg); color:var(--text); font-family:var(--mono); font-size:14px; margin:0; padding:0 20px 60px; line-height:1.55; }
+  .wrap{ max-width:920px; margin:0 auto; }
+  h1{ color:var(--amber); font-size:26px; margin:28px 0 4px; }
+  .sub{ color:var(--text-dim); font-size:13px; margin-bottom:20px; }
+  h2{ color:var(--amber); font-size:18px; margin:26px 0 12px; border-bottom:1px solid var(--line); padding-bottom:8px; }
+  section{ background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:18px 22px; margin-bottom:16px; }
+  code, pre{ font-family:var(--mono); }
+  code{ background:var(--panel-2); border:1px solid var(--line); border-radius:3px; padding:1px 5px; color:var(--green); font-size:13px; }
+  pre{ background:#000; border:1px solid var(--line); border-radius:4px; padding:10px 12px; overflow-x:auto; font-size:13px; color:#c8f0c8; }
+  pre code{ background:none; border:none; padding:0; color:inherit; }
+  a{ color:var(--amber); }
+  .tip{ background:rgba(95,217,122,0.08); border:1px solid var(--green); border-radius:4px; padding:10px 14px; margin:10px 0; }
+  .tip b{ color:var(--green); }
+  .warn{ background:rgba(255,107,94,0.08); border:1px solid var(--red); border-radius:4px; padding:10px 14px; margin:10px 0; }
+  .warn b{ color:var(--red); }
+  .pill{ display:inline-block; padding:1px 8px; border-radius:3px; font-size:11px; background:rgba(95,217,122,0.15); color:var(--green); }
+  ol, ul{ padding-left:22px; }
+  li{ margin-bottom:6px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Gateway cluster architecture</h1>
+  <div class="sub">Status: <span class="pill">implemented</span>, design rationale/reference for <code>game/apps/common/fleetgateway.lua</code>.</div>
+
+  <section>
+    <p><code>game/apps/common/fleetgateway.lua</code> (leader election + relay), <code>game/apps/common/_signed_rednet.lua</code> (shared signed-messaging module, promoted out of <code>apps/raytower/</code>), and <code>game/apps/common/fleetbridge.lua</code>'s opt-in gateway-relay path (<code>pollViaGateway</code>/<code>reportViaGateway</code>) all exist and are covered by <code>test/test_fleetgateway.lua</code> (leader election convergence + failover) and <code>test/test_gateway_relay.lua</code> (the signed poll/report relay round trip). <code>bridge_server.py</code> needed no changes at all, as this document originally predicted. This page stays as the design rationale/reference for why it's built this way, see those files' own comments for exact current behavior if the two ever drift.</p>
+    <p>Deployed with ender modems assumed fleet-wide (unlimited range, even cross-dimension), this removed every range/coverage/repeater concern an earlier draft of this document raised, and correspondingly raised the importance of signing (see "Security" below): the old "attacker needs physical proximity" implicit protection from a limited-range modem doesn't exist at all once range is unlimited.</p>
+    <div class="tip"><b>Not covered by this pass</b> (still open, matching this document's original "genuinely separate, multi-week project" framing for a fully hardened version): dashboard-side visibility into gateway topology/current leader, per-gateway metrics/alerting on split-brain, and true <code>bridge_server.py</code>-instance failover (multiple bridge processes with their own replicated state, the PC-side single point of failure this document always said gateway nodes alone don't fully remove).</div>
+  </section>
+
+  <section id="problem">
+    <h2>The problem, precisely</h2>
+    <p>Every node talks to exactly ONE <code>bridge_server.py</code> process over HTTP. If that process (or the PC it runs on) is down, EVERY node in the fleet is unreachable from the dashboard for the duration, there is no fallback path, even between two nodes sitting next to each other in the same world, which absolutely could talk to each other directly via rednet if anything told them to.</p>
+  </section>
+
+  <section id="shape">
+    <h2>Proposed shape</h2>
+    <p><b style="color:var(--amber)">Gateway nodes</b> (2-5 trusted computers) run a new <code>fleetgateway.lua</code> instead of <code>fleetbridge.lua</code>. Exactly ONE gateway is "leader" at a time, only the leader polls the real <code>bridge_server.py</code> over HTTP; every other gateway sits idle, watching for the leader to disappear.</p>
+    <p><b style="color:var(--amber)">Regular nodes</b> keep running (a modified) <code>fleetbridge.lua</code>, but instead of HTTP to <code>bridge_server.py</code> directly, they poll/report to whichever gateway is currently leader, over rednet (no HTTP dependency for regular nodes at all, only gateways need one).</p>
+    <pre><code>dashboard.html  &lt;--HTTP--&gt;  bridge_server.py  &lt;--HTTP--&gt;  [leader gateway]
+                                                                 ^
+                                                        rednet   | rednet
+                                                    (leader election +
+                                                     heartbeats between
+                                                     gateways)
+                                                                 v
+                                                   [other gateways, idle]
+                                                                 ^
+                                                          rednet | (poll/report)
+                                                                 v
+                                                        [regular nodes]</code></pre>
+    <p>If the leader gateway goes down (or loses its own HTTP path to <code>bridge_server.py</code>), the remaining gateways detect the missing heartbeat and elect a new leader within a few seconds, regular nodes don't need to know or care which gateway is leader; they just always contact "the current leader" (see "Discovery" below).</p>
+    <div class="warn"><b>This does NOT remove <code>bridge_server.py</code> as a single point of failure entirely</b>, the PC-side bridge is still one process. What it DOES fix: a regular node losing its OWN HTTP path (e.g. a bad <code>computercraft-server.toml</code> rule, a temporary network blip between that one computer and the PC) no longer isolates just that node, since it was never talking to the PC directly, and it reduces <code>bridge_server.py</code>'s own HTTP load from O(all nodes) to O(number of gateways), addressing both the TPS/server-load concern and the availability concern at once. A TRUE fix for the PC-side single point of failure would need multiple <code>bridge_server.py</code> instances with their own leader election and shared/replicated state, a further, separate project on top of this one, not covered here.</div>
+  </section>
+
+  <section id="election">
+    <h2>Leader election (Bully algorithm)</h2>
+    <p>Simple, well-understood, easy to reason about with a small (2-5) fixed set of gateways:</p>
+    <ol>
+      <li>Every gateway has a static priority (e.g. its computer ID, lowest wins, arbitrary but must be a total order every gateway agrees on without needing to ask anyone).</li>
+      <li>Each gateway periodically (every ~2s) broadcasts a signed heartbeat <code>{type="heartbeat", id=&lt;computer id&gt;, isLeader=&lt;bool&gt;}</code> on a dedicated rednet protocol (e.g. <code>"fleetgateway"</code>).</li>
+      <li>A gateway that hasn't heard a heartbeat from a HIGHER-priority gateway within <code>ELECTION_TIMEOUT</code> (~3 heartbeat intervals, to tolerate one missed beat) declares itself leader and starts announcing <code>isLeader=true</code>.</li>
+      <li>If a gateway ever hears a heartbeat from a higher-priority gateway while believing itself leader, it immediately steps down, avoids two gateways both believing they're leader (a "split brain") for longer than one heartbeat interval.</li>
+      <li>Only the leader actually opens an HTTP connection to <code>bridge_server.py</code>; every other gateway's <code>fleetgateway.lua</code> sits in the election loop only.</li>
+    </ol>
+    <p>This converges in roughly <code>ELECTION_TIMEOUT</code> seconds after a leader disappears, a 2-3 second target with a ~1s heartbeat interval and a 3-beat timeout.</p>
+  </section>
+
+  <section id="discovery">
+    <h2>Discovery (how a regular node finds "the current leader")</h2>
+    <p>Regular nodes don't run their own election logic, they just <code>rednet.broadcast</code> their poll/report and let whichever gateway is CURRENTLY leader answer (a non-leader gateway simply ignores node poll/report messages entirely). This means a regular node's <code>fleetbridge.lua</code> needs no leader-tracking state of its own, it always broadcasts, and whichever gateway happens to be leader at that moment responds. Simpler than having nodes track "who's leader" themselves, at the cost of every poll being a broadcast instead of a targeted send (acceptable, rednet broadcasts are cheap compared to the HTTP round-trips this design removes).</p>
+  </section>
+
+  <section id="security">
+    <h2>Security: signed rednet, fleet-wide</h2>
+    <p>Every message on the <code>"fleetgateway-heartbeat"</code>/<code>"fleetgateway-relay"</code> protocols (heartbeats, node poll/report relayed over rednet) MUST be signed with a shared secret, same principle as Raytower's rednet signing, <code>apps/common/_signed_rednet.lua</code>'s keyed-MAC-plus-timestamp approach (promoted out of <code>apps/raytower/</code> specifically for this) is directly reusable here.</p>
+    <div class="warn">Without this, any player with a modem in range could forge a fake heartbeat and hijack leader status, or inject fake poll/report traffic for a node they don't own, this matters even more with ender modems in play, since the old "attacker needs physical proximity" implicit protection from a limited-range modem doesn't exist at all once range is unlimited.</div>
+  </section>
+
+  <section id="migration">
+    <h2>Migration path (how to get from today's architecture to this one)</h2>
+    <ol>
+      <li>Ship <code>_signed_rednet.lua</code> as a shared module (promoted out of <code>apps/raytower/</code>), existing code reusing it instead of its own copy.</li>
+      <li>Ship <code>fleetgateway.lua</code> as a NEW, opt-in app, a fleet that doesn't install it on any node is completely unaffected, keeps working exactly as today (every node still talks to <code>bridge_server.py</code> directly). This is important: the migration must be incremental, not a flag day.</li>
+      <li>Modify <code>fleetbridge.lua</code> to prefer rednet-to-a-gateway over HTTP-to-<code>bridge_server.py</code> IF AND ONLY IF a modem is present AND at least one gateway heartbeat has been heard recently, falls back to today's direct-HTTP behavior otherwise (mirrors how <code>raytower_master.lua</code>'s <code>solveViaBridge</code> already falls back to local solving on any failure, same "never make the no-extra-infrastructure case worse" principle).</li>
+      <li><code>bridge_server.py</code> itself needs NO changes for a single-gateway-cluster deployment, it already just sees fewer, more consolidated HTTP clients (the elected leader gateway instead of every node individually).</li>
+    </ol>
+  </section>
+
+  <section id="open-questions">
+    <h2>Open questions for whoever implements this</h2>
+    <ul>
+      <li><b style="color:var(--cyan)">What happens to results/command IDs during a leader handover?</b> A command mid-flight through the old leader when it steps down needs to either complete there first or be safely retriable through the new leader, likely reuses the exact <code>inflight</code>/requeue mechanism <code>bridge_server.py</code> already has, just one more hop removed from the dashboard.</li>
+      <li><b style="color:var(--cyan)">Should <code>bridge_server.py</code> know it's talking to a gateway vs. a plain node?</b> Probably not necessary, from the bridge's perspective, a gateway polling on behalf of N nodes could just look like N individual <code>/report</code> calls relayed through one HTTP client, keeping <code>bridge_server.py</code> itself unaware of the cluster topology entirely.</li>
+      <li><b style="color:var(--cyan)">Gateway hardware requirements</b>: needs a modem (obviously) and enough uptime/reliability to be trusted as a leader candidate, likely wants to be a physically protected/admin-only computer, since a compromised gateway is a much bigger blast radius than a compromised regular node.</li>
+    </ul>
+  </section>
+</div>
+</body>
+</html>

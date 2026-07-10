@@ -1,5 +1,6 @@
+-- raytower.lua
 -- Everything in one file: triangulation math, master logic, slave logic.
--- The same file is uploaded to ALL computers (master and every tower) -
+-- The same file is uploaded to ALL computers (master and every tower),
 -- the role is chosen by the first argument at launch.
 --
 -- Usage:
@@ -13,7 +14,7 @@
 --
 -- note: this standalone tool's rednet traffic is UNSIGNED, unlike
 -- apps/raytower/raytower_master.lua|raytower_slave.lua (which support a
--- shared raytowerSecret via apps/raytower/_raytower_auth.lua). Deliberate -
+-- shared raytowerSecret via apps/common/_signed_rednet.lua). Deliberate -
 -- this file is intentionally a single, dependency-free file for one-off
 -- calibration sessions (see the header above), and pulling in the auth
 -- module would mean uploading two files instead of one. Only use this for
@@ -336,7 +337,7 @@ local function runMaster(subArgs)
 
     local cmd = (subArgs[1] or ""):gsub("^%-%-", "")
     local rawRays = loadRays()
-    local DEBUG = false
+    local DEBUG -- set below (subArgs[2]/[5] == "debug"); nil is falsy just like false, so no initializer needed
 
     if cmd == "add" then
         local id = subArgs[2]

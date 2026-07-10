@@ -31,42 +31,137 @@
   :root{
     --bg: #0c0f0d; --panel: #12160f; --panel-2: #171c14; --line: #2a3324;
     --amber: #ffb300; --amber-dim: #a87400; --text: #d8dccb; --text-dim: #8a9280;
-    --green: #5fd97a; --red: #ff6b5e;
+    --green: #5fd97a; --red: #ff6b5e; --red-dim: #a83a30;
     --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
     --cc-mono: "CC Terminal", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 24px;
+    --radius: 6px; --radius-sm: 4px;
   }
   *{box-sizing:border-box;}
-  body{ background:var(--bg); color:var(--text); font-family:var(--mono); font-size:14px; margin:0; padding:20px; }
-  h1{ color:var(--amber); font-size:20px; margin:0 0 4px; }
-  .sub{ color:var(--text-dim); font-size:12px; margin-bottom:20px; }
-  .wrap{ max-width:960px; margin:0 auto; }
-  section{ background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:16px; margin-bottom:16px; }
-  h2{ color:var(--amber); font-size:14px; margin:0 0 12px; border-bottom:1px solid var(--line); padding-bottom:8px; }
+  body{
+    background:var(--bg); color:var(--text); font-family:var(--mono); font-size:14px; margin:0; padding:20px;
+    /* Dark-themed scrollbars everywhere (Firefox) - the default light
+       system scrollbar was the one visibly un-themed element on the page. */
+    scrollbar-color: var(--line) var(--panel);
+  }
+  ::-webkit-scrollbar{ width:10px; height:10px; }
+  ::-webkit-scrollbar-track{ background:var(--panel); }
+  ::-webkit-scrollbar-thumb{ background:var(--line); border-radius:5px; border:2px solid var(--panel); }
+  ::-webkit-scrollbar-thumb:hover{ background:var(--amber-dim); }
+  h1{ color:var(--amber); font-size:22px; margin:0 0 4px; letter-spacing:0.2px; font-weight:700; }
+  h1 .prompt{ color:var(--text-dim); font-weight:400; }
+  .sub{ color:var(--text-dim); font-size:12px; margin-bottom:20px; line-height:1.5; }
+  /* 960px was a phone-era column width stretched to fill a desktop monitor
+     - on anything wider than ~1000px it left a third or more of the screen
+     empty on both sides while the fleet table cramped itself into the
+     middle. 1200px gives the table's columns (especially Apps) real room
+     without stretching single-column paragraphs into unreadably long lines. */
+  .wrap{ max-width:1200px; margin:0 auto; }
+  section{
+    background:var(--panel); border:1px solid var(--line); border-radius:var(--radius);
+    padding:var(--space-4); margin-bottom:var(--space-4);
+    box-shadow:0 1px 0 rgba(0,0,0,0.25), 0 4px 16px rgba(0,0,0,0.15);
+  }
+  h2{ color:var(--amber); font-size:14px; margin:0 0 12px; border-bottom:1px solid var(--line); padding-bottom:8px; letter-spacing:0.3px; }
   table{ width:100%; border-collapse:collapse; font-size:13px; }
   th,td{ text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); }
-  th{ color:var(--text-dim); font-weight:400; text-transform:uppercase; font-size:11px; }
+  th{ color:var(--text-dim); font-weight:400; text-transform:uppercase; font-size:11px; letter-spacing:0.4px; }
   input, select, button, textarea{
     font-family:var(--mono); background:var(--panel-2); color:var(--text);
-    border:1px solid var(--line); border-radius:4px; padding:5px 8px; font-size:13px;
+    border:1px solid var(--line); border-radius:var(--radius-sm); padding:5px 8px; font-size:13px;
+    transition:background-color .12s ease, border-color .12s ease, color .12s ease;
   }
   input{ width:90px; }
+  input::placeholder, textarea::placeholder{ color:var(--text-dim); opacity:0.7; }
+  /* Themed keyboard-focus ring (amber, matching the rest of the UI)
+     instead of the browser's default blue outline, which clashed with
+     every other accent color on the page. :focus-visible so a mouse click
+     still doesn't show a ring - only real keyboard navigation does. */
+  input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-visible{
+    outline:2px solid var(--amber); outline-offset:1px;
+  }
   button{ background:var(--amber-dim); color:var(--bg); border:none; cursor:pointer; font-weight:700; }
   button:hover{ background:var(--amber); }
+  button:disabled{ opacity:0.5; cursor:not-allowed; background:var(--amber-dim); }
   button.secondary{ background:var(--panel-2); color:var(--text); border:1px solid var(--line); }
   button.secondary:hover{ color:var(--amber); border-color:var(--amber-dim); background:var(--panel-2); }
   button.secondary.active{ color:var(--amber); border-color:var(--amber); }
+  button.secondary:disabled{ opacity:0.5; cursor:not-allowed; color:var(--text); border-color:var(--line); }
+  /* Destructive actions (delete a file, remove a node from the fleet) - a
+     visually distinct red outline so they can't be mistaken for a routine
+     save/run action at a glance, filling solid red only on hover/press
+     (an accidental brush shouldn't already look "committed"). */
+  button.danger{ background:rgba(255,107,94,0.12); color:var(--red); border:1px solid rgba(255,107,94,0.4); }
+  button.danger:hover{ background:var(--red); color:#1a0d0a; border-color:var(--red); }
+  button.danger:disabled{ opacity:0.5; cursor:not-allowed; background:rgba(255,107,94,0.12); color:var(--red); }
   .row{ display:flex; gap:8px; align-items:center; margin-bottom:8px; flex-wrap:wrap; }
   .row label{ color:var(--text-dim); font-size:12px; }
   .status-running{ color:var(--green); }
   .status-suspended{ color:var(--amber); }
   .status-dead, .status-error{ color:var(--red); }
-  .pill{ display:inline-block; padding:1px 6px; border-radius:3px; font-size:11px; }
+  .pill{ display:inline-block; padding:1px 6px; border-radius:3px; font-size:11px; font-weight:600; letter-spacing:0.2px; }
   .pill.ok{ background:rgba(95,217,122,0.15); color:var(--green); }
   .pill.stale{ background:rgba(255,107,94,0.15); color:var(--red); }
+  .pill.info{ background:rgba(138,146,128,0.15); color:var(--text-dim); }
 
-  .topbar{ display:flex; justify-content:space-between; align-items:flex-start; gap:12px; }
+  .metrics-group{ margin-bottom:14px; }
+  .metrics-group:last-child{ margin-bottom:0; }
+  .metrics-group-label{ color:var(--text-dim); font-size:11px; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:6px; }
+  .stat-grid{ display:grid; grid-template-columns:repeat(3, 1fr); gap:10px; }
+  .stat-grid.stat-grid-2{ grid-template-columns:repeat(2, 1fr); }
+  .stat-tile{ background:var(--panel-2); border:1px solid var(--line); border-radius:6px; padding:10px 12px 8px; display:flex; flex-direction:column; }
+  .stat-tile .stat-label{ color:var(--text-dim); font-size:11px; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:4px; }
+  .stat-tile .stat-value-row{ display:flex; align-items:baseline; justify-content:space-between; gap:8px; }
+  .stat-tile .stat-value{ color:var(--text); font-size:24px; font-weight:600; line-height:1.15; font-variant-numeric:proportional-nums; }
+  .stat-tile .stat-value.stat-quiet{ color:var(--green); }
+  .stat-tile .stat-value.stat-warn{ color:var(--amber); }
+  .stat-tile .stat-value.stat-bad{ color:var(--red); }
+  .stat-tile .stat-sub{ color:var(--text-dim); font-size:11px; margin-top:2px; }
+
+  .range-switch{ display:flex; gap:4px; }
+  .range-btn{ padding:3px 10px; font-size:12px; }
+  .range-btn-active{ background:var(--amber); color:#1a1200; border-color:var(--amber); }
+  .range-btn-active:hover{ background:var(--amber); color:#1a1200; }
+
+  .hist-grid{ display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:10px; }
+  .hist-tile{ background:var(--panel-2); border:1px solid var(--line); border-radius:6px; padding:10px 12px 8px; }
+  .hist-tile .stat-value-row{ display:flex; align-items:baseline; justify-content:space-between; gap:8px; margin-bottom:6px; }
+  .hist-row{ width:100%; height:56px; }
+  .hist-row svg{ display:block; width:100%; height:100%; overflow:visible; }
+  .hist-bar{ fill:var(--amber); transition:opacity 0.1s; }
+  .hist-bar.stat-quiet{ fill:var(--green); }
+  .hist-bar.stat-bad{ fill:var(--red); }
+  .hist-bar.hist-bar-dim{ opacity:0.35; }
+  .hist-baseline{ stroke:var(--line); stroke-width:1; }
+  .hist-hit{ fill:transparent; cursor:crosshair; }
+  .hist-axis{ display:flex; justify-content:space-between; color:var(--text-dim); font-size:10px; margin-top:4px; opacity:0.75; }
+  .hist-tile .stat-peak{ color:var(--text-dim); font-size:11px; margin-top:2px; font-variant-numeric:tabular-nums; }
+  .metrics-group-label .hint{ text-transform:none; letter-spacing:normal; cursor:help; border-bottom:1px dotted var(--text-dim); }
+
+  .metrics-tooltip{
+    position:fixed; z-index:50; pointer-events:none; background:var(--panel);
+    border:1px solid var(--amber-dim); border-radius:6px; padding:8px 10px;
+    font-size:12px; line-height:1.5; box-shadow:0 4px 16px rgba(0,0,0,0.5);
+    min-width:180px;
+  }
+  .metrics-tooltip .tt-time{ color:var(--amber); font-weight:600; margin-bottom:4px; }
+  .metrics-tooltip .tt-row{ display:flex; justify-content:space-between; gap:12px; color:var(--text-dim); }
+  .metrics-tooltip .tt-row b{ color:var(--text); font-weight:600; font-variant-numeric:tabular-nums; }
+
+  .topbar{ display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:var(--space-4); }
   .lang-switch{ display:flex; gap:4px; flex-shrink:0; }
   .lang-switch button{ padding:3px 10px; font-size:12px; }
+
+  /* Bridge address - a settings row, not primary workflow. Visually
+     quieter than the main panels below (thinner border, no shadow, no
+     bottom-border header treatment) and collapses its explanation behind
+     a native <details> instead of an always-on paragraph, so it doesn't
+     compete with Fleet/Terminal for attention every time the page loads. */
+  section.settings-panel{ padding:10px 16px; box-shadow:none; border-style:dashed; }
+  .settings-hint{ color:var(--text-dim); font-size:12px; }
+  .settings-hint summary{ cursor:pointer; color:var(--text-dim); }
+  .settings-hint summary:hover{ color:var(--amber); }
+  .settings-hint[open] summary{ color:var(--amber); margin-bottom:2px; }
 
   #termOutput{
     background:#000; color:#c8f0c8; font-size:13px; line-height:1.4;
@@ -82,7 +177,14 @@
     display:inline-block; background:#0d0d0d; border:8px solid #262626; border-radius:8px;
     padding:14px; box-shadow:inset 0 0 14px rgba(0,0,0,0.7), 0 2px 10px rgba(0,0,0,0.4);
   }
-  .monitor-grid-box{ display:inline-block; overflow:hidden; }
+  .monitor-grid-box{ display:inline-block; overflow:hidden; position:relative; }
+  /* Overlaid seam lines marking where one physical monitor block joins the
+     next (a real assembled monitor is several separate blocks, not one
+     seamless screen) - purely visual, pointer-events:none so clicks still
+     reach .monitor-grid for monitor_touch. Position/size recomputed in
+     applyMonitorAspect() whenever the block grid (blockW x blockH) or box
+     size changes. */
+  .monitor-seams{ position:absolute; inset:0; pointer-events:none; }
   .monitor-grid{
     display:inline-block; font-family:"CC Terminal", 'Consolas','Courier New',monospace; font-size:22px; line-height:1.15;
     cursor:pointer; transform-origin:top left;
@@ -123,8 +225,23 @@
   tbody.folder-group + tbody.folder-group tr.folder-header td{ padding-top:16px; }
   .folder-caret{ display:inline-block; width:1em; }
   #nodesTable select{ font-size:12px; padding:3px 4px; }
+  #nodesTable tbody.folder-group tr:not(.folder-header){ cursor:pointer; }
   #nodesTable tr:not(.folder-header):hover td{ background:rgba(255,179,0,0.05); }
+  /* Selected row - a background tint (not just amber text, the old
+     approach) so the current selection is legible at a glance even when
+     scanning quickly, and still visible under the hover tint above. */
+  #nodesTable tr.row-selected td{ background:rgba(255,179,0,0.1); color:var(--amber); }
+  #nodesTable tr.row-selected:hover td{ background:rgba(255,179,0,0.14); }
   .legend-swatch{ display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:4px; vertical-align:middle; }
+
+  /* Drag-and-drop feedback - shared look between the fleet table (moving
+     a computer between folders) and the Explorer (moving a file/folder
+     into another folder or a breadcrumb segment). */
+  tr.dragging, #explorerTable tr.dragging{ opacity:0.4; }
+  tbody.folder-group.drop-target{ outline:2px dashed var(--amber); outline-offset:-2px; background:rgba(255,179,0,0.08); }
+  #explorerTable tr.drop-target td, #explorerBreadcrumb button.drop-target{
+    outline:2px dashed var(--amber); outline-offset:-2px; background:rgba(255,179,0,0.08);
+  }
 
   /*: this dashboard was designed mouse/desktop-first with no adaptation
      for narrow/touch screens at all (no @media rules anywhere before this)
@@ -170,35 +287,61 @@
 <div class="wrap">
   <div class="topbar">
     <div>
-      <h1 data-i18n="page_h1">FleetOS Remote Terminal</h1>
+      <h1><span class="prompt">&gt;</span> <span data-i18n="page_h1">FleetOS Remote Terminal</span></h1>
       <div class="sub">bridge_server.py &middot; <span id="pingPill" class="pill stale">no report yet</span></div>
     </div>
     <div class="lang-switch">
+      <a id="guideLink" href="hardening_guide.html#recent-fixes" target="_blank" rel="noopener" class="secondary" style="text-decoration:none;display:inline-flex;align-items:center;padding:0 10px" data-i18n="link_guide">Guide</a>
       <button class="secondary lang-btn" data-lang="en" onclick="applyLang('en')">EN</button>
       <button class="secondary lang-btn" data-lang="ru" onclick="applyLang('ru')">RU</button>
     </div>
   </div>
 
-  <section>
-    <h2 data-i18n="bridge_title">Bridge address</h2>
-    <div class="row">
+  <section class="settings-panel">
+    <div class="row" style="margin-bottom:0">
+      <h2 style="margin:0;border:none;padding:0;flex-shrink:0" data-i18n="bridge_title">Bridge address</h2>
       <label data-i18n="bridge_running_at">bridge_server.py is running at</label>
-      <input id="bridgeUrl" style="width:260px" value="http://127.0.0.1:8787">
-    </div>
-    <div class="row">
-      <label data-i18n="label_api_key">API key (only if the bridge was started with FLEET_BRIDGE_KEY)</label>
-      <input id="bridgeKey" type="password" style="width:260px" placeholder="leave blank if none" data-i18n-ph="ph_api_key">
+      <input id="bridgeUrl" style="width:230px" value="http://127.0.0.1:8787">
+      <label data-i18n="label_api_key_short" data-i18n-title="label_api_key" title="API key (only if the bridge was started with FLEET_BRIDGE_KEY)">API key</label>
+      <input id="bridgeKey" type="password" style="width:170px" placeholder="leave blank if none" data-i18n-ph="ph_api_key" data-i18n-title="label_api_key" title="API key (only if the bridge was started with FLEET_BRIDGE_KEY)">
       <button onclick="saveBridgeUrl()" data-i18n="btn_save_reload">Save &amp; reload</button>
-    </div>
-    <div class="sub" style="margin:0" data-i18n="bridge_desc">
-      This page is a static file and can be hosted anywhere (e.g. GitHub Pages), but it always
-      talks to bridge_server.py running on your own PC. Default is right if you're viewing this
-      on the same PC running the bridge. Browsers block plain-http requests from an https page to
-      anything other than 127.0.0.1/localhost, so a remote address (e.g. a Radmin IP) only works
-      if you open this file locally (or allow insecure content for this site in your browser).
-      The API key is stored in this browser's local storage, same as the bridge address.
+      <details class="settings-hint">
+        <summary data-i18n="btn_details">details</summary>
+        <div class="sub" style="margin:6px 0 0" data-i18n="bridge_desc">
+          This page is a static file and can be hosted anywhere (e.g. GitHub Pages), but it always
+          talks to bridge_server.py running on your own PC. Default is right if you're viewing this
+          on the same PC running the bridge. Browsers block plain-http requests from an https page to
+          anything other than 127.0.0.1/localhost, so a remote address (e.g. a Radmin IP) only works
+          if you open this file locally (or allow insecure content for this site in your browser).
+          The API key is stored in this browser's local storage, same as the bridge address.
+        </div>
+      </details>
     </div>
   </section>
+
+  <section id="metricsSection" style="display:none">
+    <div class="row" style="margin-bottom:8px">
+      <h2 style="margin:0;border:none;padding:0;flex-shrink:0" data-i18n="metrics_title">Bridge metrics</h2>
+      <span id="metricsStalePill" class="pill info" data-i18n="metrics_needs_key">needs API key</span>
+    </div>
+    <div class="metrics-group">
+      <div class="metrics-group-label" data-i18n="metrics_group_fleet">Fleet</div>
+      <div id="metricsGridFleet" class="stat-grid stat-grid-2"></div>
+    </div>
+    <div class="row" id="metricsRangeRow" style="margin:12px 0 4px">
+      <span class="sub" data-i18n="metrics_range_label">History range:</span>
+      <div class="range-switch" id="metricsRangeSwitch">
+        <button class="secondary range-btn" data-range="minute" data-i18n="range_minute">1m</button>
+        <button class="secondary range-btn" data-range="15m" data-i18n="range_15m">15m</button>
+        <button class="secondary range-btn range-btn-active" data-range="hour" data-i18n="range_hour">1h</button>
+        <button class="secondary range-btn" data-range="24h" data-i18n="range_24h">24h</button>
+        <button class="secondary range-btn" data-range="week" data-i18n="range_week">1w</button>
+      </div>
+      <span id="metricsCoverageNote" class="sub"></span>
+    </div>
+    <div id="metricsHistogramGroup" class="metrics-group"></div>
+  </section>
+  <div id="metricsTooltip" class="metrics-tooltip" style="display:none"></div>
 
   <section>
     <h2 data-i18n="fleet_title">Fleet - pick a computer</h2>
@@ -216,6 +359,17 @@
     <div class="sub" id="updateStatus" style="margin:0 0 4px"></div>
     <div class="sub" id="renameStatus" style="margin:0 0 8px"></div>
 
+    <div class="sub" style="margin:0 0 4px" data-i18n="sim_spawn_desc">
+      Starts a local Windows-simulated computer as its own process on this PC, so you can test
+      without opening Minecraft - needs FLEET_ENABLE_SIM_SPAWN=1 on the bridge and a `lua` interpreter on PATH.
+    </div>
+    <div class="row">
+      <input id="simSpawnId" style="width:140px" placeholder="node id" data-i18n-ph="ph_sim_node_id">
+      <input id="simSpawnRole" style="width:120px" placeholder="role (optional)" data-i18n-ph="ph_sim_role">
+      <button class="secondary" onclick="spawnSimNode(this)" data-i18n="btn_create_emulation">Create emulation</button>
+      <span id="simSpawnStatus" class="sub"></span>
+    </div>
+
     <div class="row" id="fleetBulkBar" style="display:none">
       <span id="fleetBulkCount" class="sub"></span>
       <select id="fleetBulkFolder"></select>
@@ -223,6 +377,10 @@
       <input id="fleetBulkAppName" style="width:120px" placeholder="app name" data-i18n-ph="ph_bulk_app_name">
       <button class="secondary" onclick="bulkRunApp(this)" data-i18n="btn_run">Run</button>
       <button class="secondary" onclick="bulkKillApp(this)" data-i18n="btn_kill">Kill</button>
+      <input id="fleetBulkPin" type="password" style="width:100px" placeholder="shell PIN" data-i18n-ph="ph_shell_pin">
+      <button class="secondary" onclick="bulkSetShellPin(this)" data-i18n="btn_set_shell_pin">Set shell PIN</button>
+      <button class="secondary" onclick="bulkClearShellPin(this)" data-i18n="btn_clear_shell_pin">Clear shell PIN</button>
+      <button class="danger" onclick="bulkDeleteNodes(this)" data-i18n="btn_delete_nodes">Delete</button>
     </div>
 
     <table id="nodesTable">
@@ -235,103 +393,169 @@
   </section>
 
   <section>
-    <div class="row" style="margin-bottom:14px">
-      <button class="secondary active" id="screenTabTerminal" onclick="selectScreenTab('terminal')" data-i18n="terminal_title">Terminal</button>
-      <button class="secondary" id="screenTabMonitor" onclick="selectScreenTab('monitor')" data-i18n="monitor_title">Monitor</button>
-      <span id="screenTarget" class="sub" style="margin:0"></span>
-    </div>
+        <div class="row" style="margin-bottom:14px">
+          <button class="secondary active" id="screenTabTerminal" onclick="selectScreenTab('terminal')" data-i18n="terminal_title">Terminal</button>
+          <button class="secondary" id="screenTabMonitor" onclick="selectScreenTab('monitor')" data-i18n="monitor_title">Monitor</button>
+          <button class="secondary" id="screenTabStatus" onclick="selectScreenTab('status')" data-i18n="status_tab_title">Status</button>
+          <button class="secondary" id="screenTabDrone" onclick="selectScreenTab('drone')" data-i18n="drone_tab_title" style="display:none">Drone</button>
+          <span id="screenTarget" class="sub" style="margin:0"></span>
+        </div>
 
-    <div id="terminalPane">
-      <div id="termOutput"></div>
-      <div id="termInputRow">
-        <input id="termInput" style="flex:1" placeholder="type a command, e.g. 'ls' or 'fleetos'" data-i18n-ph="ph_terminal" autofocus>
-        <button onclick="sendTerminalLine()" data-i18n="btn_send">Send</button>
-      </div>
-      <div class="sub" style="margin:8px 0 0" data-i18n-html="terminal_desc">
-        Runs on the selected computer as if typed at its real shell prompt (via <code>shell.run</code>).
-        A program that never exits (like re-running <code>fleetos</code>) will freeze this terminal
-        until it's stopped some other way - same as it would in-game.
-      </div>
-    </div>
-
-    <div id="monitorPane" style="display:none">
-      <div class="sub" style="margin:0 0 8px" data-i18n="monitor_desc">
-        Emulates whatever's actually drawn on this computer's attached monitor peripheral, if any -
-        same colors, same content, real CC:Tweaked palette.
-      </div>
-      <div id="monitorScroll" class="monitor-scroll">
-        <div id="monitorFrame" class="monitor-frame" style="display:none">
-          <div id="monitorGridBox" class="monitor-grid-box">
-            <div id="monitorGrid" class="monitor-grid"></div>
+        <div id="terminalPane">
+          <div id="termOutput"></div>
+          <div id="termInputRow">
+            <input id="termInput" style="flex:1" placeholder="type a command, e.g. 'ls' or 'fleetos'" data-i18n-ph="ph_terminal" autofocus>
+            <button onclick="sendTerminalLine()" data-i18n="btn_send">Send</button>
+          </div>
+          <div class="sub" style="margin:8px 0 0" data-i18n-html="terminal_desc">
+            Runs on the selected computer as if typed at its real shell prompt (via <code>shell.run</code>).
+            A program that never exits (like re-running <code>fleetos</code>) will freeze this terminal
+            until it's stopped some other way - same as it would in-game.
           </div>
         </div>
-      </div>
-      <div class="sub" id="monitorStatus"></div>
-    </div>
-  </section>
 
-  <section>
-    <h2><span data-i18n="explorer_title">Explorer</span> <span id="filesTarget" class="sub"></span></h2>
-    <div class="sub" style="margin:0 0 8px" data-i18n="explorer_desc">
-      Browse, open, edit, create and delete files/folders - just like a normal file explorer.
-    </div>
-    <div class="row">
-      <label data-i18n="label_browse">Browse</label>
-      <select id="explorerSource" onchange="explorerSourceChanged()">
-        <option value="node" data-i18n="opt_source_node">Selected computer</option>
-        <option value="pc_game" data-i18n="opt_source_pc_game">This PC - game/ (deployable templates)</option>
-        <option value="pc_compute" data-i18n="opt_source_pc_compute">This PC - compute/ (Python/C++ scripts)</option>
-      </select>
-    </div>
-    <div id="explorerDropZone" ondragover="explorerOnDragOver(event)" ondragleave="explorerOnDragLeave(event)" ondrop="explorerOnDrop(event)">
-      <div class="row" id="explorerBreadcrumb"></div>
-      <div class="row">
-        <button class="secondary" onclick="explorerRefresh()" data-i18n="btn_refresh">Refresh</button>
-        <input id="newFolderName" style="width:150px" placeholder="new folder name" data-i18n-ph="ph_new_folder">
-        <button class="secondary" onclick="explorerMkdir()" data-i18n="btn_new_folder">New folder</button>
-        <input id="newFileName" style="width:150px" placeholder="new file name" data-i18n-ph="ph_new_file">
-        <button class="secondary" onclick="explorerNewFile()" data-i18n="btn_new_file">New file</button>
-      </div>
-      <table id="explorerTable">
-        <tr><th data-i18n="col_name">Name</th><th data-i18n="col_size">Size</th><th></th></tr>
-      </table>
-      <div class="sub" data-i18n="explorer_drop_hint">Drag & drop files or whole folders here to upload them.</div>
-    </div>
-    <div class="sub" id="explorerStatus"></div>
+        <div id="monitorPane" style="display:none">
+          <div class="sub" style="margin:0 0 8px" data-i18n="monitor_desc">
+            Emulates whatever's actually drawn on this computer's attached monitor peripheral, if any -
+            same colors, same content, real CC:Tweaked palette.
+          </div>
+          <div id="monitorScroll" class="monitor-scroll">
+            <div id="monitorFrame" class="monitor-frame" style="display:none">
+              <div id="monitorGridBox" class="monitor-grid-box">
+                <div id="monitorGrid" class="monitor-grid"></div>
+              </div>
+            </div>
+          </div>
+          <div class="sub" id="monitorStatus"></div>
+        </div>
 
-    <div id="fileEditorBox" style="display:none;margin-top:14px">
-      <div class="row">
-        <label data-i18n="editing_label">Editing:</label> <code id="explorerEditingPath"></code>
-        <button class="secondary" onclick="explorerCloseEditor()" data-i18n="btn_close">Close</button>
-      </div>
-      <textarea id="remoteFileContent"></textarea>
-      <div class="row">
-        <button onclick="explorerSaveFile()" data-i18n="btn_save">Save</button>
-        <span id="remoteFileStatus" class="sub"></span>
-      </div>
-      <div class="row" id="explorerAppActionsRow" style="display:none">
-        <label data-i18n="label_target">target</label>
-        <select id="explorerAppTarget" class="node-target-select"></select>
-        <button class="secondary" onclick="explorerAppRun(this)" data-i18n="btn_run">Run</button>
-        <button class="secondary" onclick="explorerAppKill(this)" data-i18n="btn_kill">Kill</button>
-        <button onclick="explorerAppDeploy(this)" data-i18n="btn_deploy">Deploy</button>
-        <span id="explorerAppActionsStatus" class="sub"></span>
-      </div>
-    </div>
-  </section>
+        <div id="statusPane" style="display:none">
+          <div class="sub" style="margin:0 0 8px" data-i18n="status_pane_desc">
+            Everything this computer reported on its last cycle - protocol version, effective
+            bridge/startup config, per-app versions, and whether a shell PIN is set.
+          </div>
+          <table id="statusFactsTable"></table>
+          <h3 style="margin:16px 0 6px" data-i18n="status_apps_title">Apps</h3>
+          <table id="statusAppsTable">
+            <tr>
+              <th data-i18n="col_name">Name</th>
+              <th data-i18n="status_col_state">State</th>
+              <th data-i18n="status_col_version">Version</th>
+            </tr>
+          </table>
+        </div>
 
-  <section>
-    <h2 data-i18n="compute_scripts_title">Compute scripts (edit / test-run on this PC)</h2>
-    <div class="sub" style="margin:0 0 8px" data-i18n-html="compute_scripts_desc">
-      New apps and compute scripts are created by dragging files into the Explorer above (source
-      "This PC - game/" or "This PC - compute/") - see <code>windows/compute/triangulation.py</code>
-      for a real example of a compute script's stdin/stdout contract. Edit or test-run an existing
-      one below.
-    </div>
-    <table id="computeTable">
-      <tr><th data-i18n="col_script">Script</th><th colspan="2"></th></tr>
-    </table>
-  </section>
+        <div id="dronePane" style="display:none">
+          <div class="sub" style="margin:0 0 8px" data-i18n="drone_desc">
+            Manual flight control - the platform self-levels automatically (see apps/drone/motor_mixer.lua);
+            these controls only ask for throttle, yaw and horizontal movement. If this tab goes stale
+            (connection drops, tab closes) the drone ramps its own throttle to 0 on its side - engaging
+            here is not required for that safety behavior, only for controlling it.
+          </div>
+          <div id="droneTelemetry" class="metrics-group">
+            <div class="stat-grid" style="grid-template-columns:repeat(4, 1fr)">
+              <div class="stat-tile"><div class="stat-label" data-i18n="drone_roll">Roll</div><div class="stat-value-row"><div class="stat-value" id="droneRoll">-</div></div></div>
+              <div class="stat-tile"><div class="stat-label" data-i18n="drone_pitch">Pitch</div><div class="stat-value-row"><div class="stat-value" id="dronePitch">-</div></div></div>
+              <div class="stat-tile"><div class="stat-label" data-i18n="drone_link">Link</div><div class="stat-value-row"><div class="stat-value" id="droneLinkStatus">-</div></div></div>
+              <div class="stat-tile"><div class="stat-label" data-i18n="drone_gyro">Gyroscope</div><div class="stat-value-row"><div class="stat-value" id="droneGyroStatus">-</div></div></div>
+            </div>
+          </div>
+          <table id="droneMotorsTable" style="margin-top:10px">
+            <tr>
+              <th data-i18n="drone_col_motor">Motor</th>
+              <th data-i18n="drone_col_thrust">Thrust (0-15)</th>
+              <th data-i18n="drone_col_tilt">Tilt (deg)</th>
+            </tr>
+          </table>
+
+          <div class="row" style="margin:14px 0 6px">
+            <button id="droneEngageBtn" class="secondary" onclick="droneToggleEngage()" data-i18n="drone_btn_engage">Engage manual control</button>
+            <button class="danger" onclick="droneStop()" data-i18n="drone_btn_stop">STOP</button>
+            <span id="droneEngagePill" class="pill info" style="display:none" data-i18n="drone_engaged">sending...</span>
+          </div>
+          <div class="stat-grid stat-grid-2" style="max-width:520px">
+            <label class="sub" style="margin:0">
+              <span data-i18n="drone_throttle">Throttle</span>: <span id="droneThrottleVal">0%</span>
+              <input id="droneThrottle" type="range" min="0" max="100" value="0" style="width:100%" oninput="droneControlsChanged()">
+            </label>
+            <label class="sub" style="margin:0">
+              <span data-i18n="drone_yaw">Yaw</span>: <span id="droneYawVal">0</span>
+              <input id="droneYaw" type="range" min="-100" max="100" value="0" style="width:100%" oninput="droneControlsChanged()">
+            </label>
+            <label class="sub" style="margin:0">
+              <span data-i18n="drone_move_x">Move X (fwd/back)</span>: <span id="droneMoveXVal">0</span>
+              <input id="droneMoveX" type="range" min="-100" max="100" value="0" style="width:100%" oninput="droneControlsChanged()">
+            </label>
+            <label class="sub" style="margin:0">
+              <span data-i18n="drone_move_y">Move Y (left/right)</span>: <span id="droneMoveYVal">0</span>
+              <input id="droneMoveY" type="range" min="-100" max="100" value="0" style="width:100%" oninput="droneControlsChanged()">
+            </label>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2><span data-i18n="explorer_title">Explorer</span> <span id="filesTarget" class="sub"></span></h2>
+        <div class="sub" style="margin:0 0 8px" data-i18n="explorer_desc">
+          Browse, open, edit, create and delete files/folders - just like a normal file explorer.
+        </div>
+        <div class="row">
+          <label data-i18n="label_browse">Browse</label>
+          <select id="explorerSource" onchange="explorerSourceChanged()">
+            <option value="node" data-i18n="opt_source_node">Selected computer</option>
+            <option value="pc_game" data-i18n="opt_source_pc_game">This PC - game/ (deployable templates)</option>
+            <option value="pc_compute" data-i18n="opt_source_pc_compute">This PC - compute/ (Python/C++ scripts)</option>
+          </select>
+        </div>
+        <div id="explorerDropZone" ondragover="explorerOnDragOver(event)" ondragleave="explorerOnDragLeave(event)" ondrop="explorerOnDrop(event)">
+          <div class="row" id="explorerBreadcrumb"></div>
+          <div class="row">
+            <button class="secondary" onclick="explorerRefresh()" data-i18n="btn_refresh">Refresh</button>
+            <input id="newFolderName" style="width:150px" placeholder="new folder name" data-i18n-ph="ph_new_folder">
+            <button class="secondary" onclick="explorerMkdir()" data-i18n="btn_new_folder">New folder</button>
+            <input id="newFileName" style="width:150px" placeholder="new file name" data-i18n-ph="ph_new_file">
+            <button class="secondary" onclick="explorerNewFile()" data-i18n="btn_new_file">New file</button>
+          </div>
+          <table id="explorerTable">
+            <tr><th data-i18n="col_name">Name</th><th data-i18n="col_size">Size</th><th></th></tr>
+          </table>
+          <div class="sub" data-i18n="explorer_drop_hint">Drag & drop files or whole folders here to upload them.</div>
+        </div>
+        <div class="sub" id="explorerStatus"></div>
+
+        <div id="fileEditorBox" style="display:none;margin-top:14px">
+          <div class="row">
+            <label data-i18n="editing_label">Editing:</label> <code id="explorerEditingPath"></code>
+            <button class="secondary" onclick="explorerCloseEditor()" data-i18n="btn_close">Close</button>
+          </div>
+          <textarea id="remoteFileContent"></textarea>
+          <div class="row">
+            <button onclick="explorerSaveFile()" data-i18n="btn_save">Save</button>
+            <span id="remoteFileStatus" class="sub"></span>
+          </div>
+          <div class="row" id="explorerAppActionsRow" style="display:none">
+            <label data-i18n="label_target">target</label>
+            <select id="explorerAppTarget" class="node-target-select"></select>
+            <button class="secondary" onclick="explorerAppRun(this)" data-i18n="btn_run">Run</button>
+            <button class="secondary" onclick="explorerAppKill(this)" data-i18n="btn_kill">Kill</button>
+            <button onclick="explorerAppDeploy(this)" data-i18n="btn_deploy">Deploy</button>
+            <span id="explorerAppActionsStatus" class="sub"></span>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2 data-i18n="compute_scripts_title">Compute scripts (edit / test-run on this PC)</h2>
+        <div class="sub" style="margin:0 0 8px" data-i18n-html="compute_scripts_desc">
+          New apps and compute scripts are created by dragging files into the Explorer above (source
+          "This PC - game/" or "This PC - compute/") - see <code>windows/compute/triangulation.py</code>
+          for a real example of a compute script's stdin/stdout contract. Edit or test-run an existing
+          one below.
+        </div>
+        <table id="computeTable">
+          <tr><th data-i18n="col_script">Script</th><th colspan="2"></th></tr>
+        </table>
+      </section>
 </div>
 
 <script>
@@ -340,6 +564,16 @@ const API_KEY = localStorage.getItem('fleetBridgeKey') || '';
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('bridgeUrl').value = API_BASE;
   document.getElementById('bridgeKey').value = API_KEY;
+  // Bug fix: this used to be a hardcoded absolute "/docs/..." href, which
+  // only works when this page is served BY the bridge itself (the common
+  // case). This file's own bridge_desc text a few lines up documents that
+  // it can also be hosted somewhere else entirely (e.g. GitHub Pages)
+  // while pointing at a bridge running elsewhere - in that case "/docs/"
+  // resolved against the WRONG origin (wherever this file is hosted, not
+  // the bridge), 404ing every time. Building it from API_BASE instead
+  // makes it always point at the actual bridge, regardless of where this
+  // page itself is served from.
+  document.getElementById('guideLink').href = API_BASE + '/docs/hardening_guide.html#recent-fixes';
 });
 
 function saveBridgeUrl() {
@@ -362,14 +596,43 @@ function saveBridgeUrl() {
 const I18N = {
   en: {
     page_h1: 'FleetOS Remote Terminal',
+    link_guide: 'Guide',
+    metrics_title: 'Bridge metrics',
+    metrics_needs_key: 'needs API key',
+    metrics_group_fleet: 'Fleet',
+    metrics_group_traffic: 'Traffic',
+    metrics_group_activity: 'Activity',
+    metrics_group_protection: 'Protection',
+    metrics_group_protection_hint: 'green = zero incidents in the shown period, red = at least one',
+    metric_uptime: 'Uptime',
+    metric_nodes_known: 'Nodes known',
+    metric_results_stored_sub: '{n} result(s) in memory',
+    metrics_range_label: 'History range:',
+    range_minute: '1m',
+    range_15m: '15m',
+    range_hour: '1h',
+    range_24h: '24h',
+    range_week: '1w',
+    metric_hist_total: '{n} total',
+    metric_hist_peak: 'peak {n} / bar',
+    metrics_axis_now: 'now',
+    metrics_coverage_short: 'only {available} of log history available',
+    metric_commands_queued: 'Commands queued',
+    metric_reports_received: 'Reports received',
+    metric_polls_served: 'Polls served',
+    metric_results_fetched: 'Results fetched',
+    metric_rate_limited: 'Rate-limited',
+    metric_http_errors: 'HTTP errors',
     ping_no_report: 'no report yet',
     ping_no_computers: 'no computers seen yet',
     ping_select_below: 'select a computer below',
     bridge_title: 'Bridge address',
     bridge_running_at: 'bridge_server.py is running at',
     label_api_key: 'API key (only if the bridge was started with FLEET_BRIDGE_KEY)',
+    label_api_key_short: 'API key',
     ph_api_key: 'leave blank if none',
     btn_save_reload: 'Save & reload',
+    btn_details: 'details',
     bridge_desc: `This page is a static file and can be hosted anywhere (e.g. GitHub Pages), but it always
       talks to bridge_server.py running on your own PC. Default is right if you're viewing this
       on the same PC running the bridge. Browsers block plain-http requests from an https page to
@@ -381,6 +644,12 @@ const I18N = {
       least once - no master, they're all equal. Terminal and Explorer below act on whichever
       one is selected.`,
     btn_update_fleetos: 'Update fleetos',
+    sim_spawn_desc: 'Starts a local Windows-simulated computer as its own process on this PC, so you can test without opening Minecraft - needs FLEET_ENABLE_SIM_SPAWN=1 on the bridge and a `lua` interpreter on PATH.',
+    ph_sim_node_id: 'node id',
+    ph_sim_role: 'role (optional)',
+    btn_create_emulation: 'Create emulation',
+    msg_sim_spawned_new: '{id} created and started (pid {pid}) - it should appear below once it polls',
+    msg_sim_spawned_existing: '{id} started again (pid {pid}) - it should appear below once it polls',
     label_rename_to: 'rename selected computer to',
     ph_new_id: 'new_id',
     btn_rename: 'Rename',
@@ -393,9 +662,44 @@ const I18N = {
     bulk_selected_count: '{n} selected:',
     btn_move_to_folder: 'Move to folder',
     ph_bulk_app_name: 'app name',
+    ph_shell_pin: 'shell PIN',
+    btn_set_shell_pin: 'Set shell PIN',
+    btn_clear_shell_pin: 'Clear shell PIN',
+    confirm_set_shell_pin: 'Require this PIN for the "bridge" command on {n} node(s)?',
+    confirm_clear_shell_pin: 'Remove the shell PIN from {n} node(s)?',
+    confirm_bulk_run: `Run '{app}' on {n} node(s)?`,
+    confirm_bulk_kill: `Kill '{app}' on {n} node(s)?`,
+    confirm_update_fleetos: 'Update fleetos on EVERY computer in the fleet and reboot them all now?',
+    msg_shell_pin_needed: 'Type a PIN first (or use "Clear shell PIN" to remove it).',
+    btn_delete_nodes: 'Delete',
+    confirm_delete_nodes: 'Remove {n} computer(s) from the fleet view? A computer that keeps polling will reappear on its next report - this only clears stale/offline entries.',
+    badge_emulated: 'EMU',
+    badge_emulated_title: 'Windows emulation (craftos_shim.lua), not a real in-game computer',
+    status_val_emulated_yes: 'yes (Windows emulation)',
+    status_val_emulated_no: 'no (real computer)',
     folder_ungroup: 'Ungroup',
     folder_rename: 'Rename',
     prompt_rename_folder: 'Rename folder "{folder}" to:',
+    drone_tab_title: 'Drone',
+    drone_desc: 'Manual flight control - the platform self-levels automatically; these controls only ask for throttle, yaw and horizontal movement. If this tab goes stale (connection drops, tab closes) the drone ramps its own throttle to 0 on its side.',
+    drone_roll: 'Roll',
+    drone_pitch: 'Pitch',
+    drone_link: 'Link',
+    drone_gyro: 'Gyroscope',
+    drone_gyro_ok: 'OK',
+    drone_gyro_missing: 'missing',
+    drone_link_live: 'live',
+    drone_link_stale: 'stale (failsafe active)',
+    drone_col_motor: 'Motor',
+    drone_col_thrust: 'Thrust (0-15)',
+    drone_col_tilt: 'Tilt (deg)',
+    drone_btn_engage: 'Engage manual control',
+    drone_btn_stop: 'STOP',
+    drone_engaged: 'sending...',
+    drone_throttle: 'Throttle',
+    drone_yaw: 'Yaw',
+    drone_move_x: 'Move X (fwd/back)',
+    drone_move_y: 'Move Y (left/right)',
     terminal_title: 'Terminal',
     ph_terminal: "type a command, e.g. 'ls' or 'fleetos'",
     btn_send: 'Send',
@@ -405,6 +709,29 @@ const I18N = {
     monitor_title: 'Monitor',
     monitor_desc: "Emulates whatever's actually drawn on this computer's attached monitor peripheral, if any - same colors, same content, real CC:Tweaked palette.",
     msg_no_monitor: 'no monitor attached to this computer (or nothing has been drawn to it yet)',
+    status_tab_title: 'Status',
+    status_pane_desc: "Everything this computer reported on its last cycle - protocol version, effective bridge/startup config, per-app versions, and whether a shell PIN is set.",
+    status_apps_title: 'Apps',
+    status_col_state: 'State',
+    status_col_version: 'Version',
+    status_fact_role: 'Role',
+    status_fact_folder: 'Folder',
+    status_fact_pos: 'Position',
+    status_fact_protocol: 'Protocol version',
+    status_fact_bridge: 'Effective bridge',
+    status_fact_startup: 'Startup override',
+    status_fact_pin: 'Shell PIN',
+    status_fact_gateway: 'Gateway role',
+    status_fact_emulated: 'Emulated',
+    status_fact_last_report: 'Last report',
+    status_val_startup_default: '(config.lua default)',
+    status_val_pin_set: 'set',
+    status_val_pin_unset: 'not set',
+    status_val_gateway_leader: 'leader',
+    status_val_gateway_follower: 'gateway, not leader',
+    status_val_gateway_none: 'not a gateway',
+    status_val_no_version: '-',
+    msg_status_select_computer: 'select a computer above to see its status',
     explorer_title: 'Explorer',
     explorer_desc: 'Browse, open, edit, create and delete files/folders - just like a normal file explorer.',
     label_browse: 'Browse',
@@ -459,18 +786,48 @@ const I18N = {
     msg_items_count: '{n} item(s)',
     confirm_delete_file: 'Delete file "{path}"?',
     confirm_delete_dir: 'Delete folder "{path}" and everything inside it?',
+    msg_cannot_move_into_self: "can't move a folder into itself or one of its own subfolders",
     root_label: '/ (root)',
   },
   ru: {
     page_h1: 'FleetOS - удалённый терминал',
+    link_guide: 'Гайд',
+    metrics_title: 'Метрики моста',
+    metrics_needs_key: 'нужен API-ключ',
+    metrics_group_fleet: 'Флот',
+    metrics_group_traffic: 'Трафик',
+    metrics_group_activity: 'Активность',
+    metrics_group_protection: 'Защита',
+    metrics_group_protection_hint: 'зелёный = ноль инцидентов за показанный период, красный = был хотя бы один',
+    metric_uptime: 'Аптайм',
+    metric_nodes_known: 'Известно узлов',
+    metric_results_stored_sub: 'результатов в памяти: {n}',
+    metrics_range_label: 'Период:',
+    range_minute: '1м',
+    range_15m: '15м',
+    range_hour: '1ч',
+    range_24h: '24ч',
+    range_week: '1н',
+    metric_hist_total: 'всего {n}',
+    metric_hist_peak: 'пик {n}/бар',
+    metrics_axis_now: 'сейчас',
+    metrics_coverage_short: 'в логах доступно только {available}',
+    metric_commands_queued: 'Команд поставлено',
+    metric_reports_received: 'Отчётов получено',
+    metric_polls_served: 'Опросов отдано',
+    metric_results_fetched: 'Результатов забрано',
+    metric_rate_limited: 'Ограничено по лимиту',
+    metric_http_errors: 'HTTP-ошибок',
     ping_no_report: 'ещё нет отчёта',
     ping_no_computers: 'компьютеры пока не найдены',
     ping_select_below: 'выберите компьютер ниже',
     bridge_title: 'Адрес моста',
     bridge_running_at: 'bridge_server.py запущен по адресу',
     label_api_key: 'Ключ API (только если мост запущен с FLEET_BRIDGE_KEY)',
+    label_api_key_short: 'Ключ API',
     ph_api_key: 'оставьте пустым, если ключа нет',
     btn_save_reload: 'Сохранить и перезагрузить',
+    btn_details: 'подробнее',
     bridge_desc: `Эта страница - статический файл и может размещаться где угодно (например, на GitHub
       Pages), но всегда обращается к bridge_server.py, запущенному на вашем ПК. Значение по
       умолчанию верно, если вы открываете эту страницу на том же ПК, где работает мост. Браузеры
@@ -483,6 +840,12 @@ const I18N = {
       опроса - единого главного нет, все компьютеры равноправны. Терминал и Проводник ниже
       работают с тем компьютером, который выбран.`,
     btn_update_fleetos: 'Обновить fleetos',
+    sim_spawn_desc: 'Запускает локальный Windows-эмулированный компьютер отдельным процессом на этом ПК - можно тестировать без запуска Minecraft. Нужен FLEET_ENABLE_SIM_SPAWN=1 на мосту и интерпретатор `lua` в PATH.',
+    ph_sim_node_id: 'id компьютера',
+    ph_sim_role: 'роль (необязательно)',
+    btn_create_emulation: 'Создать эмуляцию',
+    msg_sim_spawned_new: '{id} создан и запущен (pid {pid}) - появится ниже после первого опроса',
+    msg_sim_spawned_existing: '{id} запущен снова (pid {pid}) - появится ниже после первого опроса',
     label_rename_to: 'переименовать выбранный компьютер в',
     ph_new_id: 'новый_id',
     btn_rename: 'Переименовать',
@@ -495,9 +858,44 @@ const I18N = {
     bulk_selected_count: 'выбрано: {n}',
     btn_move_to_folder: 'Переместить в папку',
     ph_bulk_app_name: 'имя приложения',
+    ph_shell_pin: 'PIN шелла',
+    btn_set_shell_pin: 'Задать PIN шелла',
+    btn_clear_shell_pin: 'Снять PIN шелла',
+    confirm_set_shell_pin: 'Требовать этот PIN для команды "bridge" на {n} компьютер(ов)?',
+    confirm_clear_shell_pin: 'Убрать PIN шелла с {n} компьютер(ов)?',
+    confirm_bulk_run: `Запустить «{app}» на {n} компьютер(ов)?`,
+    confirm_bulk_kill: `Остановить «{app}» на {n} компьютер(ов)?`,
+    confirm_update_fleetos: 'Обновить fleetos на ВСЕХ компьютерах флота и перезагрузить их все прямо сейчас?',
+    msg_shell_pin_needed: 'Сначала введите PIN (или используйте «Снять PIN шелла», чтобы его убрать).',
+    btn_delete_nodes: 'Удалить',
+    confirm_delete_nodes: 'Убрать {n} компьютер(ов) из списка флота? Компьютер, который продолжает опрашивать бридж, появится снова при следующем отчёте - это чистит только устаревшие/оффлайн записи.',
+    badge_emulated: 'ЭМУ',
+    badge_emulated_title: 'Windows-эмуляция (craftos_shim.lua), не настоящий игровой компьютер',
+    status_val_emulated_yes: 'да (Windows-эмуляция)',
+    status_val_emulated_no: 'нет (настоящий компьютер)',
     folder_ungroup: 'Разгруппировать',
     folder_rename: 'Переименовать',
     prompt_rename_folder: 'Переименовать папку «{folder}» в:',
+    drone_tab_title: 'Дрон',
+    drone_desc: 'Ручное управление полётом - платформа сама держит горизонт; эти элементы задают только тягу, рысканье и горизонтальное движение. Если вкладка перестанет обновляться (пропало соединение, закрыта вкладка), дрон сам сведёт свою тягу к 0.',
+    drone_roll: 'Крен',
+    drone_pitch: 'Тангаж',
+    drone_link: 'Связь',
+    drone_gyro: 'Гироскоп',
+    drone_gyro_ok: 'есть',
+    drone_gyro_missing: 'нет',
+    drone_link_live: 'активна',
+    drone_link_stale: 'устарела (сработал failsafe)',
+    drone_col_motor: 'Мотор',
+    drone_col_thrust: 'Тяга (0-15)',
+    drone_col_tilt: 'Наклон (град)',
+    drone_btn_engage: 'Включить ручное управление',
+    drone_btn_stop: 'СТОП',
+    drone_engaged: 'отправка...',
+    drone_throttle: 'Тяга',
+    drone_yaw: 'Рысканье',
+    drone_move_x: 'Движение X (вперёд/назад)',
+    drone_move_y: 'Движение Y (влево/вправо)',
     terminal_title: 'Терминал',
     ph_terminal: "введите команду, например 'ls' или 'fleetos'",
     btn_send: 'Отправить',
@@ -508,6 +906,29 @@ const I18N = {
     monitor_title: 'Монитор',
     monitor_desc: 'Эмулирует то, что реально выведено на подключённый к этому компьютеру монитор (если он есть) - те же цвета, то же содержимое, настоящая палитра CC:Tweaked.',
     msg_no_monitor: 'к этому компьютеру не подключён монитор (или на него ещё ничего не выводилось)',
+    status_tab_title: 'Статус',
+    status_pane_desc: 'Всё, что этот компьютер сообщил на последнем цикле опроса - версия протокола, действующий адрес моста/автозапуск, версии приложений и установлен ли PIN шелла.',
+    status_apps_title: 'Приложения',
+    status_col_state: 'Состояние',
+    status_col_version: 'Версия',
+    status_fact_role: 'Роль',
+    status_fact_folder: 'Папка',
+    status_fact_pos: 'Позиция',
+    status_fact_protocol: 'Версия протокола',
+    status_fact_bridge: 'Действующий мост',
+    status_fact_startup: 'Автозапуск (override)',
+    status_fact_pin: 'PIN шелла',
+    status_fact_gateway: 'Роль шлюза',
+    status_fact_emulated: 'Эмулированный',
+    status_fact_last_report: 'Последний отчёт',
+    status_val_startup_default: '(по умолчанию из config.lua)',
+    status_val_pin_set: 'установлен',
+    status_val_pin_unset: 'не установлен',
+    status_val_gateway_leader: 'лидер',
+    status_val_gateway_follower: 'шлюз, не лидер',
+    status_val_gateway_none: 'не шлюз',
+    status_val_no_version: '-',
+    msg_status_select_computer: 'выберите компьютер выше, чтобы увидеть его статус',
     explorer_title: 'Проводник',
     explorer_desc: 'Просматривайте, открывайте, редактируйте, создавайте и удаляйте файлы и папки - как в обычном проводнике.',
     label_browse: 'Источник',
@@ -562,6 +983,7 @@ const I18N = {
     msg_items_count: 'объектов: {n}',
     confirm_delete_file: 'Удалить файл «{path}»?',
     confirm_delete_dir: 'Удалить папку «{path}» со всем содержимым?',
+    msg_cannot_move_into_self: 'нельзя переместить папку в саму себя или в свою же вложенную папку',
     root_label: '/ (корень)',
   },
 };
@@ -601,6 +1023,14 @@ function applyLang(lang) {
   // "list" command to whatever node is selected just to relabel two column
   // headers, which are already retranslated by the data-i18n sweep above -
   // a language toggle shouldn't cost a round trip to a real computer.
+  // The histogram group builds its own labels in JS once and then only
+  // ever updates bar geometry in place (see refreshMetricsHistory) - force
+  // a rebuild so a language switch doesn't leave it stuck in the old one
+  // until the page is reloaded.
+  if (metricsHistogramTiles) {
+    metricsHistogramTiles = null;
+    refreshMetricsHistory();
+  }
 }
 
 document.addEventListener('DOMContentLoaded', () => applyLang(LANG));
@@ -659,10 +1089,16 @@ function selectNode(id) {
   // currently browsing "Selected computer" (a PC-side edit is unaffected by
   // which node happens to be selected).
   if (explorerSource === 'node' && !explorerConfirmDiscard()) return;
+  // droneSendCurrentSetpoint() reads `selectedNode` fresh on every send, so
+  // an engaged send loop left running across a node switch would silently
+  // redirect this drone's joystick positions to whatever's selected next -
+  // stop it here rather than relying on the operator to remember to hit
+  // STOP first.
+  if (droneEngaged) droneStop();
   selectedNode = id || null;
   if (selectedNode) localStorage.setItem('fleetSelectedNode', selectedNode);
   else localStorage.removeItem('fleetSelectedNode');
-  lastRenderedOutputLen = -1; // force terminal to redraw for the new node
+  lastRenderedOutputKey = null; // force terminal to redraw for the new node
   updateTargetLabels();
   refreshNodeDropdowns();
   if (explorerSource === 'node') {
@@ -750,15 +1186,24 @@ function statusClass(s) {
 
 // ---- Terminal ----
 
-let lastRenderedOutputLen = -1;
+let lastRenderedOutputKey = null;
 
+// Comparing lines.length alone (the old check) goes stale once a node's
+// output crosses bridge_server.py's MAX_OUTPUT_LINES_STORED cap (200): past
+// that point the stored array's length stops changing at all (old lines
+// drop off the front as new ones are appended to the back), so a
+// length-only guard would freeze the terminal forever right when a node has
+// been running a while - exactly when you most want to see fresh output.
+// Comparing the joined text instead correctly detects that content changed
+// even while length stays constant.
 function renderTerminal(lines) {
   if (!lines) return;
-  if (lines.length === lastRenderedOutputLen) return; // avoid scroll-jitter on unchanged output
-  lastRenderedOutputLen = lines.length;
+  const key = lines.join('\n');
+  if (key === lastRenderedOutputKey) return; // avoid scroll-jitter on genuinely unchanged output
+  lastRenderedOutputKey = key;
   const el = document.getElementById('termOutput');
   const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 20;
-  el.textContent = lines.join('\n');
+  el.textContent = key;
   if (atBottom) el.scrollTop = el.scrollHeight;
 }
 
@@ -799,11 +1244,15 @@ function selectScreenTab(tab) {
 }
 
 function updateScreenTabUI() {
-  const isMonitor = screenTab === 'monitor';
-  document.getElementById('terminalPane').style.display = isMonitor ? 'none' : '';
-  document.getElementById('monitorPane').style.display = isMonitor ? '' : 'none';
-  document.getElementById('screenTabTerminal').classList.toggle('active', !isMonitor);
-  document.getElementById('screenTabMonitor').classList.toggle('active', isMonitor);
+  document.getElementById('terminalPane').style.display = screenTab === 'terminal' ? '' : 'none';
+  document.getElementById('monitorPane').style.display = screenTab === 'monitor' ? '' : 'none';
+  document.getElementById('statusPane').style.display = screenTab === 'status' ? '' : 'none';
+  document.getElementById('dronePane').style.display = screenTab === 'drone' ? '' : 'none';
+  document.getElementById('screenTabTerminal').classList.toggle('active', screenTab === 'terminal');
+  document.getElementById('screenTabMonitor').classList.toggle('active', screenTab === 'monitor');
+  document.getElementById('screenTabStatus').classList.toggle('active', screenTab === 'status');
+  document.getElementById('screenTabDrone').classList.toggle('active', screenTab === 'drone');
+  if (screenTab === 'drone') droneStartEngageLoopIfNeeded(); else droneStopEngageLoop();
 }
 
 // Our monospace screen font doesn't render at the same per-character pixel
@@ -878,6 +1327,35 @@ function applyMonitorAspect() {
   box.style.width = Math.round(targetWidth) + 'px';
   box.style.height = Math.round(targetHeight) + 'px';
   lastMonitorBoxHeight = targetHeight;
+  updateMonitorBlockSeams(box);
+}
+
+// Draws the thin seam lines between physical monitor blocks (e.g. a 3x2
+// monitor shows 2 vertical + 1 horizontal seam, like 6 separate screens
+// bolted together) so the emulation actually reads as a multi-block
+// monitor instead of one seamless rectangle - the block count already
+// drove the aspect ratio above, this just makes it visible too. A 1x1
+// monitor draws no seams at all (nothing to divide).
+function updateMonitorBlockSeams(box) {
+  let seams = document.getElementById('monitorSeams');
+  if (!seams) {
+    seams = document.createElement('div');
+    seams.id = 'monitorSeams';
+    seams.className = 'monitor-seams';
+    box.appendChild(seams);
+  }
+  const bw = lastMonitorBlockW || 1;
+  const bh = lastMonitorBlockH || 1;
+  const layers = [];
+  for (let i = 1; i < bw; i++) {
+    const p = (100 * i / bw).toFixed(4) + '%';
+    layers.push(`linear-gradient(to right, transparent calc(${p} - 1px), rgba(0,0,0,0.5) ${p}, transparent calc(${p} + 1px))`);
+  }
+  for (let i = 1; i < bh; i++) {
+    const p = (100 * i / bh).toFixed(4) + '%';
+    layers.push(`linear-gradient(to bottom, transparent calc(${p} - 1px), rgba(0,0,0,0.5) ${p}, transparent calc(${p} + 1px))`);
+  }
+  seams.style.background = layers.length ? layers.join(', ') : 'none';
 }
 
 // Sizes #termOutput to match the monitor's last-computed rendered height,
@@ -969,12 +1447,24 @@ async function onMonitorGridClick(ev) {
 }
 document.getElementById('monitorGrid').addEventListener('click', onMonitorGridClick);
 
+// Terminal command history (Up/Down, same convention as a real shell) -
+// only meaningful now that the Windows-emulated shell.run actually DOES
+// something with what you type (see craftos_shim.lua) instead of a canned
+// "(mocked)" message, so retyping/adjusting a previous command is now a
+// real, recurring thing to want. Page-lifetime only (not persisted) -
+// termHistoryIndex -1 means "not currently browsing history".
+let termHistory = [];
+let termHistoryIndex = -1;
+let termHistoryDraft = ''; // whatever was typed before the first ArrowUp, restored on ArrowDown past the newest entry
+
 async function sendTerminalLine() {
   if (!selectedNode) { alert(t('msg_select_computer_first')); return; }
   const input = document.getElementById('termInput');
   const text = input.value;
   if (!text) return;
   input.value = '';
+  if (termHistory[termHistory.length - 1] !== text) termHistory.push(text);
+  termHistoryIndex = -1;
   try {
     await postCommand({ type: 'type', node: selectedNode, text });
   } catch (err) {
@@ -983,8 +1473,21 @@ async function sendTerminalLine() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  document.getElementById('termInput').addEventListener('keydown', e => {
-    if (e.key === 'Enter') sendTerminalLine();
+  const input = document.getElementById('termInput');
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { sendTerminalLine(); return; }
+    if (e.key === 'ArrowUp') {
+      if (!termHistory.length) return;
+      e.preventDefault();
+      if (termHistoryIndex === -1) termHistoryDraft = input.value;
+      termHistoryIndex = Math.min(termHistory.length - 1, termHistoryIndex + 1);
+      input.value = termHistory[termHistory.length - 1 - termHistoryIndex];
+    } else if (e.key === 'ArrowDown') {
+      if (termHistoryIndex === -1) return;
+      e.preventDefault();
+      termHistoryIndex -= 1;
+      input.value = termHistoryIndex === -1 ? termHistoryDraft : termHistory[termHistory.length - 1 - termHistoryIndex];
+    }
   });
 });
 
@@ -1102,6 +1605,71 @@ function explorerSourceChanged() {
   explorerRefresh();
 }
 
+// Dragged-item side channel, same reasoning as the fleet table's
+// draggedNodeIds - dataTransfer's actual payload isn't readable until
+// drop fires, but we're dragging within the same page/document anyway.
+let draggedExplorerPath = null;
+
+function explorerClearDropTargets() {
+  document.querySelectorAll('.drop-target').forEach(el => el.classList.remove('drop-target'));
+}
+
+// Wires up `el` (a directory row or a breadcrumb button) as a drop target
+// that moves whatever's being dragged into `dirPath`. Shared between
+// explorerAppendRow (directory rows) and explorerRenderBreadcrumb (moving
+// something up to an ancestor without navigating there first).
+function explorerMakeDropTarget(el, dirPath) {
+  el.addEventListener('dragover', (ev) => {
+    if (!draggedExplorerPath || draggedExplorerPath === dirPath) return;
+    ev.preventDefault();
+    ev.dataTransfer.dropEffect = 'move';
+    el.classList.add('drop-target');
+  });
+  el.addEventListener('dragleave', (ev) => {
+    if (!el.contains(ev.relatedTarget)) el.classList.remove('drop-target');
+  });
+  el.addEventListener('drop', async (ev) => {
+    ev.preventDefault();
+    // Deliberately NOT stopPropagation() - letting this bubble to
+    // #explorerDropZone's own ondrop (explorerOnDrop, for OS file
+    // uploads) is safe: a same-page drag has no dt.files/dt.items of
+    // kind "file", so that handler just no-ops - and it's what clears
+    // the dropzone's own .dragover highlight class, which we'd otherwise
+    // have to duplicate here.
+    el.classList.remove('drop-target');
+    const fromPath = draggedExplorerPath;
+    draggedExplorerPath = null;
+    await explorerMoveInto(fromPath, dirPath);
+  });
+}
+
+// Moves `fromPath` to be a child of `toDirPath` (top-level move, keeping
+// its own name) - used by both drag-and-drop targets above. Refuses to
+// drop a folder into itself or one of its own descendants, which `move`
+// would otherwise either no-op strangely or corrupt depending on the
+// provider (moving a directory inside itself isn't a meaningful operation
+// on any of the three providers).
+async function explorerMoveInto(fromPath, toDirPath) {
+  if (!fromPath || fromPath === toDirPath) return;
+  if (toDirPath === fromPath || toDirPath.startsWith(fromPath + '/')) {
+    document.getElementById('explorerStatus').textContent = t('msg_error_prefix') + t('msg_cannot_move_into_self');
+    return;
+  }
+  const name = fromPath.split('/').pop();
+  const currentParent = fromPath.includes('/') ? fromPath.slice(0, fromPath.lastIndexOf('/')) : '';
+  if (currentParent === toDirPath) return; // already there
+  const to = toDirPath ? toDirPath + '/' + name : name;
+  const status = document.getElementById('explorerStatus');
+  await withStatus(status, null, async () => {
+    await explorerProvider().move(fromPath, to);
+    if (explorerOpenPath === fromPath) {
+      explorerOpenPath = to;
+      document.getElementById('explorerEditingPath').textContent = to;
+    }
+    await explorerRefresh();
+  });
+}
+
 function explorerRenderBreadcrumb() {
   const el = document.getElementById('explorerBreadcrumb');
   el.innerHTML = '';
@@ -1109,6 +1677,7 @@ function explorerRenderBreadcrumb() {
   rootBtn.className = 'secondary';
   rootBtn.textContent = t('root_label');
   rootBtn.onclick = () => explorerGo('');
+  explorerMakeDropTarget(rootBtn, '');
   el.appendChild(rootBtn);
   if (explorerPath) {
     let acc = '';
@@ -1119,6 +1688,7 @@ function explorerRenderBreadcrumb() {
       b.className = 'secondary';
       b.textContent = part;
       b.onclick = () => explorerGo(target);
+      explorerMakeDropTarget(b, target);
       el.appendChild(b);
     }
   }
@@ -1169,6 +1739,22 @@ function explorerAppendRow(table, entry) {
   const fullPath = explorerPath ? explorerPath + '/' + entry.name : entry.name;
   const tr = document.createElement('tr');
 
+  // Any row can be dragged (to move it elsewhere); only directory rows
+  // are valid drop targets (nothing can be moved "into" a file).
+  tr.draggable = true;
+  tr.addEventListener('dragstart', (ev) => {
+    draggedExplorerPath = fullPath;
+    ev.dataTransfer.effectAllowed = 'move';
+    ev.dataTransfer.setData('text/plain', fullPath);
+    tr.classList.add('dragging');
+  });
+  tr.addEventListener('dragend', () => {
+    tr.classList.remove('dragging');
+    draggedExplorerPath = null;
+    explorerClearDropTargets();
+  });
+  if (entry.isDir) explorerMakeDropTarget(tr, fullPath);
+
   const tdName = document.createElement('td');
   const link = document.createElement('a');
   link.textContent = (entry.isDir ? '\u{1F4C1} ' : fileIcon(entry.name) + ' ') + entry.name;
@@ -1211,6 +1797,7 @@ function explorerAppendRow(table, entry) {
   tdActions.appendChild(dlBtn);
 
   const delBtn = document.createElement('button');
+  delBtn.className = 'danger';
   delBtn.textContent = t('btn_delete');
   delBtn.onclick = () => explorerRowAction(tr, () => explorerDelete(fullPath, entry.isDir));
   tdActions.appendChild(delBtn);
@@ -1598,6 +2185,7 @@ async function explorerOnDrop(ev) {
 // versions - one button, always "*".
 
 async function updateFleetos(btn) {
+  if (!confirm(t('confirm_update_fleetos'))) return;
   const status = document.getElementById('updateStatus');
   status.textContent = tf('msg_fetching_reboot', { node: t('msg_every_computer') });
   await withStatus(status, btn, async () => {
@@ -1632,6 +2220,30 @@ async function renameNode(btn) {
       document.getElementById('renameNodeInput').value = '';
       selectNode(newId); // switch Terminal/Explorer to follow it under the new id
     }
+  });
+}
+
+// Starts a local Windows-simulated computer (a real `lua` OS process on
+// whatever PC is running bridge_server.py) via POST /admin/spawn_sim_node -
+// dev/testing convenience so you don't need a terminal open to spin up a
+// test node. Disabled bridge-side unless FLEET_ENABLE_SIM_SPAWN=1; the
+// bridge's error message for that case is shown as-is (already descriptive).
+async function spawnSimNode(btn) {
+  const idInput = document.getElementById('simSpawnId');
+  const roleInput = document.getElementById('simSpawnRole');
+  const status = document.getElementById('simSpawnStatus');
+  const id = idInput.value.trim();
+  if (!id) { status.textContent = t('msg_name_required'); idInput.focus(); return; }
+  const role = roleInput.value.trim() || 'generic';
+  await withStatus(status, btn, async () => {
+    const res = await apiFetch('/admin/spawn_sim_node', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, role }),
+    });
+    const data = await res.json();
+    status.textContent = tf(data.created ? 'msg_sim_spawned_new' : 'msg_sim_spawned_existing', { id, pid: data.pid });
+    idInput.value = '';
+    roleInput.value = '';
   });
 }
 
@@ -1839,6 +2451,190 @@ function appsSummaryFragment(apps, appVersions) {
   return frag;
 }
 
+// ---- Status pane (third tab, next to Terminal/Monitor) - a fuller view
+// of one computer's last report than the fleet table's compact columns:
+// protocol version, effective (resolved) bridge/startup config, per-app
+// versions, whether a shell PIN is set. Built with createElement/
+// textContent throughout, same reasoning as appsSummaryFragment right
+// above - every value here comes from a node's own /report, so innerHTML
+// with this data would be a stored-XSS vector.
+// isGatewayLeader is only ever present on a report from a node that's ALSO
+// running apps/common/fleetgateway.lua (see that file's setShared/report()'s
+// getShared handoff) - true/false there, undefined on every regular node.
+function gatewayRoleText(isGatewayLeader) {
+  if (isGatewayLeader === true) return t('status_val_gateway_leader');
+  if (isGatewayLeader === false) return t('status_val_gateway_follower');
+  return t('status_val_gateway_none');
+}
+
+function statusFactRow(labelKey, value) {
+  const tr = document.createElement('tr');
+  const th = document.createElement('th');
+  th.textContent = t(labelKey);
+  const td = document.createElement('td');
+  td.textContent = value;
+  tr.append(th, td);
+  return tr;
+}
+
+function renderStatusPane(nodeMeta, report) {
+  const factsTable = document.getElementById('statusFactsTable');
+  const appsTable = document.getElementById('statusAppsTable');
+  factsTable.innerHTML = '';
+  while (appsTable.rows.length > 1) appsTable.deleteRow(1); // keep the header row
+
+  if (!selectedNode || !nodeMeta) {
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.textContent = t('msg_status_select_computer');
+    tr.appendChild(td);
+    factsTable.appendChild(tr);
+    return;
+  }
+
+  const cfg = (report && report.effectiveConfig) || {};
+  const pos = report && report.pos;
+  const posText = pos ? `${pos.x}, ${pos.y}, ${pos.z}` : t('pos_unknown');
+  const ageText = nodeMeta.seconds_since_report == null
+    ? t('ping_no_report')
+    : `${nodeMeta.seconds_since_report.toFixed(1)}s ago`;
+
+  factsTable.append(
+    statusFactRow('status_fact_role', (report && report.role) || t('status_val_no_version')),
+    statusFactRow('status_fact_folder', nodeMeta.folder || t('opt_no_folder')),
+    statusFactRow('status_fact_pos', posText),
+    statusFactRow('status_fact_protocol', report && report.protocolVersion != null ? String(report.protocolVersion) : t('status_val_no_version')),
+    statusFactRow('status_fact_bridge', cfg.bridgeUrl || t('status_val_no_version')),
+    statusFactRow('status_fact_startup', cfg.startup ? cfg.startup.join(', ') : t('status_val_startup_default')),
+    statusFactRow('status_fact_pin', nodeMeta.shellPinSet ? t('status_val_pin_set') : t('status_val_pin_unset')),
+    statusFactRow('status_fact_gateway', gatewayRoleText(report && report.isGatewayLeader)),
+    statusFactRow('status_fact_emulated', (report && report.emulated) ? t('status_val_emulated_yes') : t('status_val_emulated_no')),
+    statusFactRow('status_fact_last_report', ageText),
+  );
+
+  const appVersions = (report && report.appVersions) || {};
+  ((report && report.apps) || []).forEach(entry => {
+    const sep = entry.indexOf(':');
+    const name = sep === -1 ? entry : entry.slice(0, sep);
+    const state = sep === -1 ? '' : entry.slice(sep + 1);
+    const tr = document.createElement('tr');
+    const tdName = document.createElement('td'); tdName.textContent = name;
+    const tdState = document.createElement('td');
+    const stateSpan = document.createElement('span');
+    stateSpan.className = statusClass(state);
+    stateSpan.textContent = state;
+    tdState.appendChild(stateSpan);
+    const tdVersion = document.createElement('td'); tdVersion.textContent = appVersions[name] || t('status_val_no_version');
+    tr.append(tdName, tdState, tdVersion);
+    appsTable.appendChild(tr);
+  });
+}
+
+// ---- Drone manual control (apps/drone/drone_control.lua telemetry +
+// drone_set commands) - only meaningful for a node whose latest report
+// includes `drone` (see fleetbridge.lua's report() hook); every other
+// node just keeps the tab hidden, same pattern the folder/gateway fields
+// use elsewhere on this page. ----
+
+const DRONE_SEND_INTERVAL_MS = 200; // matches drone_config.lua's tickSeconds order of magnitude
+let droneEngaged = false;
+let droneSendTimer = null;
+
+function renderDroneTab(nodeMeta, report) {
+  const tabBtn = document.getElementById('screenTabDrone');
+  const drone = report && report.drone;
+  tabBtn.style.display = drone ? '' : 'none';
+  if (!drone) {
+    if (screenTab === 'drone') selectScreenTab('terminal'); // node changed/lost drone telemetry mid-view
+    droneStopEngageLoop();
+    return;
+  }
+
+  const attitude = drone.attitude;
+  document.getElementById('droneRoll').textContent = attitude ? attitude.roll.toFixed(1) + '°' : '-';
+  document.getElementById('dronePitch').textContent = attitude ? attitude.pitch.toFixed(1) + '°' : '-';
+  document.getElementById('droneGyroStatus').textContent = attitude ? t('drone_gyro_ok') : t('drone_gyro_missing');
+  document.getElementById('droneGyroStatus').className = 'stat-value ' + (attitude ? 'stat-quiet' : 'stat-bad');
+  document.getElementById('droneLinkStatus').textContent = drone.setpointStale ? t('drone_link_stale') : t('drone_link_live');
+  document.getElementById('droneLinkStatus').className = 'stat-value ' + (drone.setpointStale ? 'stat-warn' : 'stat-quiet');
+
+  const table = document.getElementById('droneMotorsTable');
+  while (table.rows.length > 1) table.deleteRow(1);
+  (drone.motors || []).forEach(motor => {
+    const tr = document.createElement('tr');
+    const tdName = document.createElement('td'); tdName.textContent = motor.name;
+    const tdThrust = document.createElement('td'); tdThrust.textContent = motor.thrust.toFixed(1);
+    const tdTilt = document.createElement('td'); tdTilt.textContent = motor.tilt.toFixed(1) + '°';
+    tr.append(tdName, tdThrust, tdTilt);
+    table.appendChild(tr);
+  });
+}
+
+function droneReadControls() {
+  return {
+    throttle: Number(document.getElementById('droneThrottle').value) / 100,
+    yawRate: Number(document.getElementById('droneYaw').value) / 100,
+    moveX: Number(document.getElementById('droneMoveX').value) / 100,
+    moveY: Number(document.getElementById('droneMoveY').value) / 100,
+  };
+}
+
+function droneControlsChanged() {
+  document.getElementById('droneThrottleVal').textContent = document.getElementById('droneThrottle').value + '%';
+  document.getElementById('droneYawVal').textContent = document.getElementById('droneYaw').value;
+  document.getElementById('droneMoveXVal').textContent = document.getElementById('droneMoveX').value;
+  document.getElementById('droneMoveYVal').textContent = document.getElementById('droneMoveY').value;
+  // No immediate send here - droneSendTimer (while engaged) already sends
+  // on a fixed interval, which is also what the drone's failsafe timeout
+  // is calibrated against (drone_config.lua's failsafeTimeoutSeconds).
+  // Sending on every slider tick too would just be redundant traffic.
+}
+
+async function droneSendCurrentSetpoint() {
+  if (!selectedNode) return;
+  try {
+    await postCommand({ type: 'drone_set', node: selectedNode, ...droneReadControls() });
+  } catch (err) {
+    // A dropped command here is exactly what drone_control.lua's failsafe
+    // ramp exists for - no special handling needed client-side beyond not
+    // crashing the send loop.
+  }
+}
+
+function droneStartEngageLoopIfNeeded() {
+  if (!droneEngaged || droneSendTimer) return;
+  droneSendTimer = setInterval(droneSendCurrentSetpoint, DRONE_SEND_INTERVAL_MS);
+  droneSendCurrentSetpoint();
+}
+
+function droneStopEngageLoop() {
+  if (droneSendTimer) { clearInterval(droneSendTimer); droneSendTimer = null; }
+}
+
+function droneToggleEngage() {
+  droneEngaged = !droneEngaged;
+  document.getElementById('droneEngageBtn').classList.toggle('active', droneEngaged);
+  document.getElementById('droneEngagePill').style.display = droneEngaged ? '' : 'none';
+  if (droneEngaged) droneStartEngageLoopIfNeeded();
+  else droneStopEngageLoop();
+}
+
+// Hard stop: zeroes every axis and sends it immediately, regardless of
+// whether manual control is currently engaged - the one control on this
+// tab that should always work as an e-stop, not gated behind "engage".
+function droneStop() {
+  document.getElementById('droneThrottle').value = 0;
+  document.getElementById('droneYaw').value = 0;
+  document.getElementById('droneMoveX').value = 0;
+  document.getElementById('droneMoveY').value = 0;
+  droneControlsChanged();
+  droneEngaged = false;
+  document.getElementById('droneEngageBtn').classList.remove('active');
+  document.getElementById('droneEngagePill').style.display = 'none';
+  droneStopEngageLoop();
+  droneSendCurrentSetpoint();
+}
+
 // ---- Fleet folders (dashboard-side node organization, persisted
 // server-side in bridge_server.py's node_meta.json via /node_folder -
 // purely organizational, no node ever needs to know its own folder) ----
@@ -1968,7 +2764,7 @@ async function bulkRunApp(btn) {
   // fired instantly on every checked node before this existed - a
   // misclick (or forgetting which nodes were still checked from a previous
   // action) ran an app fleet-wide with no way to undo it.
-  if (!confirm(`Run '${app}' on ${checkedNodeIds.length} node(s)?`)) return;
+  if (!confirm(tf('confirm_bulk_run', { app, n: checkedNodeIds.size }))) return;
   await withStatus(null, btn, async () => {
     for (const id of checkedNodeIds) await postCommand({ type: 'run', node: id, app });
   });
@@ -1977,10 +2773,336 @@ async function bulkRunApp(btn) {
 async function bulkKillApp(btn) {
   const app = document.getElementById('fleetBulkAppName').value.trim();
   if (!app) return;
-  if (!confirm(`Kill '${app}' on ${checkedNodeIds.length} node(s)?`)) return;
+  if (!confirm(tf('confirm_bulk_kill', { app, n: checkedNodeIds.size }))) return;
   await withStatus(null, btn, async () => {
     for (const id of checkedNodeIds) await postCommand({ type: 'kill', node: id, app });
   });
+}
+
+// Sets/clears the PIN a node's local "shell" app requires before it'll
+// accept a `bridge <url> [key]` command - opt-in (off unless a PIN is set
+// for that node), verified against the bridge itself, never stored on the
+// node - see apps/common/shell.lua's bridge command for the check.
+async function setShellPin(nodeIds, pin) {
+  await apiFetch('/admin/shell_pin', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ nodes: nodeIds, pin }),
+  });
+}
+
+async function bulkSetShellPin(btn) {
+  const pinInput = document.getElementById('fleetBulkPin');
+  const pin = pinInput.value;
+  if (!pin) { alert(t('msg_shell_pin_needed')); return; }
+  if (!confirm(tf('confirm_set_shell_pin', { n: checkedNodeIds.size }))) return;
+  await withStatus(null, btn, async () => {
+    await setShellPin([...checkedNodeIds], pin);
+  });
+  pinInput.value = '';
+}
+
+async function bulkClearShellPin(btn) {
+  if (!confirm(tf('confirm_clear_shell_pin', { n: checkedNodeIds.size }))) return;
+  await withStatus(null, btn, async () => {
+    await setShellPin([...checkedNodeIds], '');
+  });
+  document.getElementById('fleetBulkPin').value = '';
+}
+
+// Bridge-side only (see /admin/delete_node's own comment) - a node that's
+// still actually polling reappears on its next report. Meant for clearing
+// out stale/decommissioned/test entries (e.g. leftover ids from earlier
+// testing), not for "turning off" a live computer.
+async function bulkDeleteNodes(btn) {
+  if (!confirm(tf('confirm_delete_nodes', { n: checkedNodeIds.size }))) return;
+  const ids = [...checkedNodeIds];
+  await withStatus(null, btn, async () => {
+    await apiFetch('/admin/delete_node', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nodes: ids }),
+    });
+  });
+  checkedNodeIds = new Set();
+  if (selectedNode && ids.includes(selectedNode)) { selectedNode = null; updateTargetLabels(); }
+  await refreshStatus();
+}
+
+// ---- Fleet table rows - one small view-object per node id, kept alive
+// across polls instead of the whole table being torn down and rebuilt from
+// scratch every cycle (the previous approach). That mattered for real:
+// rebuilding a live <select> (the folder dropdown) destroys and recreates
+// it, which silently snaps shut mid-click if a poll happens to land while
+// a user has it open - reproducible any time a poll (as fast as every
+// 250ms right after a command) raced an in-progress folder change. Cells
+// are patched in place instead, which also avoids checkbox click races and
+// needless DOM churn as the fleet grows.
+class FleetRowView {
+  constructor(id) {
+    this.id = id;
+    this._appsKey = null;
+    this._folderKey = null; // `${folder}|${allFolders}|${lang}` - only rebuild the <select> when this changes
+
+    this.tr = document.createElement('tr');
+    this.tr.onclick = () => selectNode(this.id);
+
+    // Drag-to-reassign folder: dragging a checked row that's part of a
+    // multi-selection carries the whole selection along, matching the
+    // existing bulk-action convention (check several, act on all of
+    // them) instead of only ever moving the one row physically grabbed.
+    this.tr.draggable = true;
+    this.tr.addEventListener('dragstart', (ev) => {
+      draggedNodeIds = (checkedNodeIds.has(this.id) && checkedNodeIds.size > 1) ? [...checkedNodeIds] : [this.id];
+      ev.dataTransfer.effectAllowed = 'move';
+      ev.dataTransfer.setData('text/plain', draggedNodeIds.join(','));
+      this.tr.classList.add('dragging');
+    });
+    this.tr.addEventListener('dragend', () => {
+      this.tr.classList.remove('dragging');
+      draggedNodeIds = [];
+      document.querySelectorAll('#nodesTable tbody.folder-group.drop-target').forEach(el => el.classList.remove('drop-target'));
+    });
+
+    const tdCheck = document.createElement('td');
+    this.cb = document.createElement('input');
+    this.cb.type = 'checkbox';
+    this.cb.onclick = (ev) => { ev.stopPropagation(); toggleNodeChecked(this.id, this.cb.checked); };
+    tdCheck.appendChild(this.cb);
+
+    this.tdId = document.createElement('td');
+    this.tdId.appendChild(document.createTextNode(id));
+    this.emuBadge = null; // created lazily, only for emulated nodes
+
+    this.tdRole = document.createElement('td');
+    this.tdPos = document.createElement('td');
+    this.tdApps = document.createElement('td');
+
+    this.tdPill = document.createElement('td');
+    this.pillSpan = document.createElement('span');
+    this.tdPill.appendChild(this.pillSpan);
+
+    this.tdFolder = document.createElement('td');
+
+    this.tr.append(tdCheck, this.tdId, this.tdRole, this.tdPos, this.tdApps, this.tdPill, this.tdFolder);
+  }
+
+  // Patches this row's cells to match the latest /status data for this
+  // node - never recreates this.tr itself, so the row keeps its DOM
+  // identity (hover state, any in-progress interaction) across polls.
+  update(n, allFolders) {
+    const age = n.seconds_since_report;
+    const pillClass = age == null ? 'stale' : (age > 10 ? 'stale' : 'ok');
+    const pillText = age == null ? t('ping_no_report') : `${age.toFixed(1)}s ago`;
+    const report = n.latest_report || {};
+
+    this.tr.classList.toggle('row-selected', this.id === selectedNode);
+    this.cb.checked = checkedNodeIds.has(this.id);
+
+    if (report.emulated && !this.emuBadge) {
+      this.emuBadge = document.createElement('span');
+      this.emuBadge.className = 'pill info';
+      this.tdId.append(' ', this.emuBadge);
+    } else if (!report.emulated && this.emuBadge) {
+      this.emuBadge.remove();
+      this.emuBadge = null;
+    }
+    if (this.emuBadge) {
+      this.emuBadge.textContent = t('badge_emulated');
+      this.emuBadge.title = t('badge_emulated_title');
+    }
+
+    const roleText = report.role || '?';
+    // config.lua's own bridgeUrl/startup fields can silently drift out of
+    // sync with what's actually in effect (bridge_override.txt/
+    // startup_override.txt are never merged back into config.lua's source,
+    // to avoid clobbering an admin's own comments/formatting). Surface
+    // that divergence instead of hiding it.
+    const startupOverride = report.effectiveConfig && report.effectiveConfig.startup;
+    this.tdRole.textContent = startupOverride ? roleText + ' *' : roleText;
+    this.tdRole.title = startupOverride
+      ? 'startup override active (differs from config.lua): ' + startupOverride.join(', ')
+      : '';
+
+    this.tdPos.textContent = formatPos(report.pos);
+
+    const appsKey = JSON.stringify([report.apps, report.appVersions]) + '|' + LANG;
+    if (appsKey !== this._appsKey) {
+      this._appsKey = appsKey;
+      this.tdApps.innerHTML = '';
+      this.tdApps.appendChild(appsSummaryFragment(report.apps, report.appVersions));
+    }
+
+    this.pillSpan.className = 'pill ' + pillClass;
+    this.pillSpan.textContent = pillText;
+
+    // Skipped while the select itself has focus (the user has it open, or
+    // just picked a value from it) - the browser already reflects the new
+    // value on the live element natively; rebuilding mid-interaction is
+    // exactly the flicker/snap-shut this class exists to avoid.
+    const folderKey = (n.folder || '') + '|' + allFolders.join(',') + '|' + LANG;
+    if (folderKey !== this._folderKey && document.activeElement !== this.tdFolder.firstChild) {
+      this._folderKey = folderKey;
+      this.tdFolder.innerHTML = '';
+      this.tdFolder.appendChild(nodeFolderSelect(this.id, n.folder || '', allFolders));
+    }
+  }
+}
+
+let fleetRowViews = new Map(); // node id -> FleetRowView, persists across polls
+let draggedNodeIds = []; // ids currently being dragged (see FleetRowView's dragstart) - a same-page side channel rather than dataTransfer.getData, which isn't readable until drop fires
+
+// ---- Fleet table folder groups - same "patch in place, never blindly
+// rebuild" idea as FleetRowView, one level up. A folder's <tbody> and
+// header <tr> are created once and kept alive; membership is reconciled
+// via insertBefore, which is a no-op for any row that's already sitting in
+// its correct slot. That matters beyond just cosmetics: an EARLIER version
+// of this rewrite still nuked and rebuilt every tbody whenever ANY folder's
+// membership changed (or collapse/language state changed) - which meant an
+// admin renaming folder A could still silently blur/close a completely
+// unrelated open folder <select> in folder B, the exact bug this whole
+// class exists to avoid. Only actually-moving rows are touched now.
+class FleetGroupView {
+  constructor(folderName) {
+    this.folderName = folderName;
+    this.collapseKey = folderName || ' unassigned';
+    this.tbody = document.createElement('tbody');
+    this.tbody.className = 'folder-group';
+    this.tbody.style.setProperty('--folder-color', folderColor(folderName));
+
+    this.headerTr = document.createElement('tr');
+    this.headerTr.className = 'folder-header';
+    this.headerTd = document.createElement('td');
+    this.headerTd.colSpan = 7;
+    this.caret = document.createElement('span');
+    this.caret.className = 'folder-caret';
+    this.label = document.createElement('span');
+    this.headerTd.append(this.caret, this.label);
+    this.headerTd.onclick = (ev) => {
+      if (ev.target.tagName === 'BUTTON') return;
+      if (collapsedFolders.has(this.collapseKey)) collapsedFolders.delete(this.collapseKey); else collapsedFolders.add(this.collapseKey);
+      saveCollapsedFolders();
+      refreshStatus();
+    };
+    this.renameBtn = null;
+    this.ungroupBtn = null;
+
+    this.headerTr.appendChild(this.headerTd);
+    this.tbody.appendChild(this.headerTr);
+
+    // Drop anywhere in this folder's group (its header, or any of its
+    // rows) to reassign the dragged node(s) here - a single listener on
+    // the tbody covers both since drop bubbles up from whichever row/cell
+    // was actually under the cursor.
+    this.tbody.addEventListener('dragover', (ev) => {
+      if (!draggedNodeIds.length) return;
+      ev.preventDefault();
+      ev.dataTransfer.dropEffect = 'move';
+      this.tbody.classList.add('drop-target');
+    });
+    this.tbody.addEventListener('dragleave', (ev) => {
+      if (!this.tbody.contains(ev.relatedTarget)) this.tbody.classList.remove('drop-target');
+    });
+    this.tbody.addEventListener('drop', async (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      this.tbody.classList.remove('drop-target');
+      const ids = draggedNodeIds;
+      draggedNodeIds = [];
+      for (const id of ids) await setNodeFolder(id, this.folderName);
+    });
+  }
+
+  updateHeader(ids) {
+    const collapsed = collapsedFolders.has(this.collapseKey);
+    this.tbody.classList.toggle('collapsed', collapsed);
+    this.caret.textContent = collapsed ? '▸' : '▾';
+    this.label.textContent = ' ' + (this.folderName || t('opt_no_folder')) + ` (${ids.length})`;
+
+    if (this.folderName && !this.renameBtn) {
+      this.renameBtn = document.createElement('button');
+      this.renameBtn.className = 'secondary'; this.renameBtn.style.marginLeft = '10px';
+      this.ungroupBtn = document.createElement('button');
+      this.ungroupBtn.className = 'secondary'; this.ungroupBtn.style.marginLeft = '6px';
+      this.headerTd.append(this.renameBtn, this.ungroupBtn);
+    } else if (!this.folderName && this.renameBtn) {
+      this.renameBtn.remove(); this.ungroupBtn.remove();
+      this.renameBtn = null; this.ungroupBtn = null;
+    }
+    if (this.renameBtn) {
+      this.renameBtn.textContent = t('folder_rename');
+      this.renameBtn.onclick = (ev) => { ev.stopPropagation(); folderRename(this.folderName, ids); };
+      this.ungroupBtn.textContent = t('folder_ungroup');
+      this.ungroupBtn.onclick = (ev) => { ev.stopPropagation(); folderUngroup(ids); };
+    }
+  }
+
+  // Makes `ids` (in order) exactly this tbody's row children, moving the
+  // fewest possible <tr>s - a row already in the right slot is never
+  // touched (insertBefore no-ops when the node is already positioned
+  // there), which is what actually preserves focus/open state.
+  syncRows(ids, rowsById) {
+    let after = this.headerTr;
+    for (const id of ids) {
+      const tr = rowsById.get(id).tr;
+      if (after.nextElementSibling !== tr) this.tbody.insertBefore(tr, after.nextElementSibling);
+      after = tr;
+    }
+    let stray = after.nextElementSibling;
+    while (stray) { const next = stray.nextElementSibling; stray.remove(); stray = next; }
+  }
+}
+
+let fleetGroupViews = new Map(); // folder name ("" = unassigned) -> FleetGroupView, persists across polls
+let fleetHeaderRow = null;       // built once; cell text refreshed in place on language change
+let fleetTableInitialized = false;
+
+function ensureFleetHeaderRow() {
+  if (fleetHeaderRow) return fleetHeaderRow;
+  const tr = document.createElement('tr');
+  const chTh = document.createElement('th');
+  const cb = document.createElement('input');
+  cb.type = 'checkbox'; cb.id = 'fleetSelectAll';
+  cb.onclick = () => toggleSelectAll(cb);
+  chTh.appendChild(cb);
+  const cols = ['col_node', 'col_role', 'col_pos', 'col_apps', 'col_last_report', 'col_folder'];
+  const ths = cols.map(() => document.createElement('th'));
+  tr.append(chTh, ...ths);
+  tr._cols = cols; tr._ths = ths;
+  fleetHeaderRow = tr;
+  return tr;
+}
+
+function placeAfter(el, afterEl) {
+  if (afterEl.nextSibling !== el) afterEl.parentNode.insertBefore(el, afterEl.nextSibling);
+}
+
+// Reconciles the whole #nodesTable DOM against the latest folder grouping.
+// Safe (and cheap) to call every single poll - when nothing has actually
+// changed, every step below is a no-op comparison, so no node anywhere in
+// the table is touched at all.
+function syncFleetTable(nodesTable, orderedFolderNames, groups, rowsById) {
+  if (!fleetTableInitialized) {
+    nodesTable.innerHTML = '';
+    const thead = document.createElement('thead');
+    thead.appendChild(ensureFleetHeaderRow());
+    nodesTable.appendChild(thead);
+    fleetTableInitialized = true;
+  }
+  fleetHeaderRow._cols.forEach((key, i) => { fleetHeaderRow._ths[i].textContent = t(key); });
+
+  for (const [folderName, gv] of [...fleetGroupViews]) {
+    if (!groups.has(folderName)) { gv.tbody.remove(); fleetGroupViews.delete(folderName); }
+  }
+
+  let after = fleetHeaderRow.parentNode; // the <thead>
+  for (const folderName of orderedFolderNames) {
+    let gv = fleetGroupViews.get(folderName);
+    if (!gv) { gv = new FleetGroupView(folderName); fleetGroupViews.set(folderName, gv); }
+    placeAfter(gv.tbody, after);
+    after = gv.tbody;
+    const ids = groups.get(folderName);
+    gv.updateHeader(ids);
+    gv.syncRows(ids, rowsById);
+  }
 }
 
 async function refreshStatus() {
@@ -2010,9 +3132,6 @@ async function refreshStatus() {
   checkedNodeIds = new Set([...checkedNodeIds].filter(id => nodeIds.includes(id)));
 
   const nodesTable = document.getElementById('nodesTable');
-  nodesTable.innerHTML = `<tr><th><input type="checkbox" id="fleetSelectAll" onclick="toggleSelectAll(this)"></th><th>${t('col_node')}</th><th>${t('col_role')}</th><th>${t('col_pos')}</th><th>${t('col_apps')}</th><th>${t('col_last_report')}</th><th>${t('col_folder')}</th></tr>`;
-  document.getElementById('fleetSelectAll').checked = nodeIds.length > 0 && checkedNodeIds.size === nodeIds.length;
-
   const allFolders = [...new Set(nodeIds.map(id => nodes[id].folder).filter(Boolean))].sort();
   refreshBulkFolderOptions(allFolders);
   const groups = new Map(); // folder name ("" = unassigned) -> [ids]
@@ -2024,88 +3143,20 @@ async function refreshStatus() {
   const orderedFolderNames = [...groups.keys()].filter(f => f).sort();
   if (groups.has('')) orderedFolderNames.push(''); // unassigned nodes shown last
 
-  for (const folderName of orderedFolderNames) {
-    const ids = groups.get(folderName);
-    const tbody = document.createElement('tbody');
-    tbody.className = 'folder-group';
-    tbody.style.setProperty('--folder-color', folderColor(folderName));
-    const collapseKey = folderName || ' unassigned';
-    if (collapsedFolders.has(collapseKey)) tbody.classList.add('collapsed');
-
-    const headerTr = document.createElement('tr');
-    headerTr.className = 'folder-header';
-    const headerTd = document.createElement('td');
-    headerTd.colSpan = 7;
-    const caret = document.createElement('span');
-    caret.className = 'folder-caret';
-    caret.textContent = collapsedFolders.has(collapseKey) ? '▸' : '▾';
-    const label = document.createElement('span');
-    label.textContent = ' ' + (folderName || t('opt_no_folder')) + ` (${ids.length})`;
-    headerTd.append(caret, label);
-    headerTd.onclick = (ev) => {
-      if (ev.target.tagName === 'BUTTON') return;
-      if (collapsedFolders.has(collapseKey)) collapsedFolders.delete(collapseKey); else collapsedFolders.add(collapseKey);
-      saveCollapsedFolders();
-      refreshStatus();
-    };
-    if (folderName) {
-      const renameBtn = document.createElement('button');
-      renameBtn.className = 'secondary'; renameBtn.style.marginLeft = '10px';
-      renameBtn.textContent = t('folder_rename');
-      renameBtn.onclick = (ev) => { ev.stopPropagation(); folderRename(folderName, ids); };
-      const ungroupBtn = document.createElement('button');
-      ungroupBtn.className = 'secondary'; ungroupBtn.style.marginLeft = '6px';
-      ungroupBtn.textContent = t('folder_ungroup');
-      ungroupBtn.onclick = (ev) => { ev.stopPropagation(); folderUngroup(ids); };
-      headerTd.append(renameBtn, ungroupBtn);
-    }
-    headerTr.appendChild(headerTd);
-    tbody.appendChild(headerTr);
-
-    for (const id of ids) {
-      const n = nodes[id];
-      const age = n.seconds_since_report;
-      const pillClass = age == null ? 'stale' : (age > 10 ? 'stale' : 'ok');
-      const pillText = age == null ? t('ping_no_report') : `${age.toFixed(1)}s ago`;
-      const report = n.latest_report || {};
-      const tr = document.createElement('tr');
-      tr.style.cursor = 'pointer';
-      tr.onclick = () => selectNode(id);
-      if (id === selectedNode) tr.style.color = 'var(--amber)';
-
-      const tdCheck = document.createElement('td');
-      const cb = document.createElement('input');
-      cb.type = 'checkbox';
-      cb.checked = checkedNodeIds.has(id);
-      cb.onclick = (ev) => { ev.stopPropagation(); toggleNodeChecked(id, cb.checked); };
-      tdCheck.appendChild(cb);
-
-      const tdId = document.createElement('td'); tdId.textContent = id;
-      const tdRole = document.createElement('td'); tdRole.textContent = report.role || '?';
-      // config.lua's own bridgeUrl/startup fields can silently drift out
-      // of sync with what's actually in effect (bridge_override.txt/
-      // startup_override.txt are never merged back into config.lua's
-      // source, to avoid clobbering an admin's own comments/formatting).
-      // Surface that divergence instead of hiding it.
-      if (report.effectiveConfig && report.effectiveConfig.startup) {
-        tdRole.title = 'startup override active (differs from config.lua): ' + report.effectiveConfig.startup.join(', ');
-        tdRole.textContent += ' *';
-      }
-      const tdPos = document.createElement('td'); tdPos.textContent = formatPos(report.pos);
-      const tdApps = document.createElement('td'); tdApps.appendChild(appsSummaryFragment(report.apps, report.appVersions));
-      const tdPill = document.createElement('td');
-      const pillSpan = document.createElement('span');
-      pillSpan.className = 'pill ' + pillClass;
-      pillSpan.textContent = pillText;
-      tdPill.appendChild(pillSpan);
-      const tdFolder = document.createElement('td');
-      tdFolder.appendChild(nodeFolderSelect(id, n.folder || '', allFolders));
-
-      tr.append(tdCheck, tdId, tdRole, tdPos, tdApps, tdPill, tdFolder);
-      tbody.appendChild(tr);
-    }
-    nodesTable.appendChild(tbody);
+  for (const id of nodeIds) {
+    if (!fleetRowViews.has(id)) fleetRowViews.set(id, new FleetRowView(id));
   }
+  for (const id of [...fleetRowViews.keys()]) {
+    if (!nodeIds.includes(id)) fleetRowViews.delete(id); // node deleted/gone - drop its view too
+  }
+
+  syncFleetTable(nodesTable, orderedFolderNames, groups, fleetRowViews);
+  document.getElementById('fleetSelectAll').checked = nodeIds.length > 0 && checkedNodeIds.size === nodeIds.length;
+
+  // Always patch every row's live content - age ticks every poll even when
+  // nothing structural changed, and this only ever touches textContent/
+  // class on already-existing nodes, never recreates them.
+  for (const id of nodeIds) fleetRowViews.get(id).update(nodes[id], allFolders);
 
   updateBulkBar();
 
@@ -2129,6 +3180,378 @@ async function refreshStatus() {
   const report = selected && selected.latest_report;
   if (report) renderTerminal(report.output);
   renderMonitor(report && report.monitor);
+  renderStatusPane(selected, report);
+  renderDroneTab(selected, report);
+}
+
+// ---- Metrics panel ----
+// Two data sources, two cadences:
+//  - GET /metrics: the bridge's CURRENT snapshot (uptime, nodes known) -
+//    polled fast (METRICS_POLL_MS), feeds only the small "Fleet" tiles.
+//  - GET /metrics/history?range=X: bucketed counts reconstructed from
+//    bridge.log itself (see that route's own comment in bridge_server.py),
+//    covering the selected range - polled slower (METRICS_HISTORY_POLL_MS)
+//    since it's a real log-parse server-side, not a cheap dict read, and
+//    re-fetched immediately on a range switch.
+// Requires a full/read-only API key server-side - a 401 here almost always
+// just means "no key entered yet", not a real error, so it's shown as a
+// quiet hint rather than a scary failure.
+function formatUptime(seconds) {
+  if (typeof seconds !== 'number') return '-';
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
+function formatRate(n) {
+  if (n >= 100) return Math.round(n).toLocaleString();
+  if (n >= 10) return n.toFixed(1);
+  return n.toFixed(2);
+}
+
+function makeStatTile({ label, value, sub }) {
+  const div = document.createElement('div');
+  div.className = 'stat-tile';
+  const labelEl = document.createElement('div');
+  labelEl.className = 'stat-label';
+  labelEl.textContent = label;
+  const row = document.createElement('div');
+  row.className = 'stat-value-row';
+  const valueEl = document.createElement('div');
+  valueEl.className = 'stat-value';
+  valueEl.textContent = value;
+  row.appendChild(valueEl);
+  div.append(labelEl, row);
+  if (sub) {
+    const subEl = document.createElement('div');
+    subEl.className = 'stat-sub';
+    subEl.textContent = sub;
+    div.appendChild(subEl);
+  }
+  return div;
+}
+
+async function refreshMetricsCurrent() {
+  const section = document.getElementById('metricsSection');
+  const pill = document.getElementById('metricsStalePill');
+  let data;
+  try {
+    const res = await apiFetch('/metrics');
+    data = await res.json();
+  } catch (err) {
+    section.style.display = '';
+    pill.style.display = '';
+    const needsKey = /401|unauthorized/i.test(err.message);
+    pill.textContent = needsKey ? t('metrics_needs_key') : err.message;
+    pill.className = 'pill ' + (needsKey ? 'info' : 'stale');
+    return false;
+  }
+  section.style.display = '';
+  pill.style.display = 'none';
+  const grid = document.getElementById('metricsGridFleet');
+  grid.innerHTML = '';
+  grid.append(
+    makeStatTile({ label: t('metric_uptime'), value: formatUptime(data.uptime_seconds) }),
+    makeStatTile({
+      label: t('metric_nodes_known'), value: (data.nodes_known ?? 0).toLocaleString(),
+      sub: tf('metric_results_stored_sub', { n: (data.results_stored ?? 0).toLocaleString() }),
+    }),
+  );
+  return true;
+}
+
+const METRICS_POLL_MS = 2000;
+function scheduleNextMetricsPoll() {
+  setTimeout(async () => {
+    await refreshMetricsCurrent();
+    scheduleNextMetricsPoll();
+  }, METRICS_POLL_MS);
+}
+
+// ---- History histograms (GET /metrics/history) ----
+const METRICS_HISTORY_POLL_MS = 15000;
+let currentMetricsRange = 'hour';
+let metricsHistoryData = null; // last successful /metrics/history response
+
+// Grouped by what the numbers actually mean, not just a flat list of 6 -
+// Traffic (requests flowing through), Activity (work being done),
+// Protection (things that only fire when something's wrong - the only
+// group where status coloring applies, hence its hint).
+const METRICS_HISTOGRAM_GROUPS = [
+  {
+    labelKey: 'metrics_group_traffic',
+    tiles: [
+      { labelKey: 'metric_polls_served', field: 'polls_served' },
+      { labelKey: 'metric_reports_received', field: 'reports_received' },
+    ],
+  },
+  {
+    labelKey: 'metrics_group_activity',
+    tiles: [
+      { labelKey: 'metric_commands_queued', field: 'commands_queued' },
+      { labelKey: 'metric_results_fetched', field: 'results_fetched' },
+    ],
+  },
+  {
+    labelKey: 'metrics_group_protection',
+    hintKey: 'metrics_group_protection_hint',
+    tiles: [
+      { labelKey: 'metric_rate_limited', field: 'rate_limited', statusFn: n => n > 0 ? 'stat-bad' : 'stat-quiet' },
+      { labelKey: 'metric_http_errors', field: 'http_errors', statusFn: n => n > 0 ? 'stat-bad' : 'stat-quiet' },
+    ],
+  },
+];
+const METRICS_HISTOGRAM_TILES = METRICS_HISTOGRAM_GROUPS.flatMap(g => g.tiles);
+
+// Bucket-time formatting depends on how zoomed in the range is - a minute
+// view wants seconds, a week view wants the date, otherwise the label is
+// either meaningless (":34" with no hour) or needlessly noisy (a full
+// date on every bar of a 1-minute view).
+function formatBucketTime(ts, range) {
+  const d = new Date(ts * 1000);
+  if (range === 'week') return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  if (range === '24h') return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function showMetricsTooltip(evt, bucket, range) {
+  const tt = document.getElementById('metricsTooltip');
+  const rows = METRICS_HISTOGRAM_TILES.map(({ labelKey, field }) =>
+    `<div class="tt-row"><span>${t(labelKey)}</span><b>${(bucket[field] ?? 0).toLocaleString()}</b></div>`).join('');
+  tt.innerHTML = `<div class="tt-time">${formatBucketTime(bucket.ts, range)}</div>${rows}`;
+  tt.style.display = 'block';
+  positionMetricsTooltip(evt);
+}
+
+function positionMetricsTooltip(evt) {
+  const tt = document.getElementById('metricsTooltip');
+  const margin = 14;
+  let x = evt.clientX + margin, y = evt.clientY + margin;
+  const rect = tt.getBoundingClientRect();
+  if (x + rect.width > window.innerWidth) x = evt.clientX - rect.width - margin;
+  if (y + rect.height > window.innerHeight) y = evt.clientY - rect.height - margin;
+  tt.style.left = x + 'px';
+  tt.style.top = y + 'px';
+}
+
+function hideMetricsTooltip() {
+  document.getElementById('metricsTooltip').style.display = 'none';
+}
+
+// SVG bars + one wider transparent "hit" rect per bucket (interaction.md:
+// hit targets bigger than the mark) so a thin bar at high bucket-density
+// (e.g. 96 buckets/tile) is still easy to hover precisely. Returns
+// {svg, update(buckets, range)} instead of a one-shot node: the periodic
+// poll calls update() on the SAME bar/hit elements (bucket count is fixed
+// per range) so a refresh reflows bar heights in place instead of tearing
+// down and rebuilding the whole tile - no flash, no lost hover state,
+// no listener churn (anti-patterns.md: "skeleton flash on refetch").
+function buildHistogramSVG(field) {
+  const w = 600, h = 100;
+  const svgNs = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(svgNs, 'svg');
+  svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+  svg.setAttribute('preserveAspectRatio', 'none');
+
+  const baseline = document.createElementNS(svgNs, 'line');
+  baseline.setAttribute('class', 'hist-baseline');
+  baseline.setAttribute('x1', '0');
+  baseline.setAttribute('x2', String(w));
+  baseline.setAttribute('y1', String(h - 1));
+  baseline.setAttribute('y2', String(h - 1));
+  svg.appendChild(baseline);
+
+  // live.buckets/.range are read by the hover handlers below at hover time
+  // (not closed over per-bar), so update() can just replace them - the
+  // handlers automatically see fresh data without being re-attached.
+  const live = { buckets: [], range: null };
+  let bars = [], hits = [];
+
+  function rebuild(n) {
+    while (svg.lastChild !== baseline) svg.removeChild(svg.lastChild);
+    bars = []; hits = [];
+    const gap = 1, slot = w / n, barW = Math.max(1, slot - gap);
+    for (let i = 0; i < n; i++) {
+      const x = (i * slot).toFixed(2);
+      const bar = document.createElementNS(svgNs, 'rect');
+      bar.setAttribute('class', 'hist-bar');
+      bar.setAttribute('x', x);
+      bar.setAttribute('width', barW.toFixed(2));
+      bar.setAttribute('rx', Math.min(2, barW / 2).toFixed(2));
+      svg.appendChild(bar);
+      bars.push(bar);
+
+      const hit = document.createElementNS(svgNs, 'rect');
+      hit.setAttribute('class', 'hist-hit');
+      hit.setAttribute('x', x);
+      hit.setAttribute('y', '0');
+      hit.setAttribute('width', slot.toFixed(2));
+      hit.setAttribute('height', String(h));
+      const idx = i;
+      hit.addEventListener('mouseenter', evt => {
+        bars[idx].classList.add('hist-bar-dim');
+        if (live.buckets[idx]) showMetricsTooltip(evt, live.buckets[idx], live.range);
+      });
+      hit.addEventListener('mousemove', positionMetricsTooltip);
+      hit.addEventListener('mouseleave', () => {
+        bars[idx].classList.remove('hist-bar-dim');
+        hideMetricsTooltip();
+      });
+      svg.appendChild(hit);
+      hits.push(hit);
+    }
+  }
+
+  function update(buckets, range, statusCls) {
+    if (bars.length !== buckets.length) rebuild(buckets.length);
+    live.buckets = buckets;
+    live.range = range;
+    const barCls = 'hist-bar' + (statusCls ? ' ' + statusCls : '');
+    const max = Math.max(...buckets.map(b => b[field] ?? 0), 1);
+    buckets.forEach((bucket, i) => {
+      const v = bucket[field] ?? 0;
+      const barH = Math.max(v > 0 ? 2 : 0, (v / max) * (h - 4));
+      // Re-applied every update, not just at creation - a Protection tile
+      // can flip quiet<->bad between polls as errors start/stop happening,
+      // and a stale class would leave the color wrong until the next range
+      // switch (which is the only other time these bars get rebuilt).
+      bars[i].setAttribute('class', bars[i].classList.contains('hist-bar-dim') ? barCls + ' hist-bar-dim' : barCls);
+      bars[i].setAttribute('y', (h - barH).toFixed(2));
+      bars[i].setAttribute('height', barH.toFixed(2));
+    });
+  }
+
+  return { svg, update };
+}
+
+function buildHistogramTile({ labelKey, field, statusFn }) {
+  const div = document.createElement('div');
+  div.className = 'hist-tile';
+  const row = document.createElement('div');
+  row.className = 'stat-value-row';
+  const label = document.createElement('div');
+  label.className = 'stat-label';
+  label.textContent = t(labelKey);
+  const value = document.createElement('div');
+  value.className = 'stat-value';
+  row.append(label, value);
+  const histRow = document.createElement('div');
+  histRow.className = 'hist-row';
+  const axis = document.createElement('div');
+  axis.className = 'hist-axis';
+  const axisStart = document.createElement('span');
+  const axisEnd = document.createElement('span');
+  axisEnd.textContent = t('metrics_axis_now');
+  axis.append(axisStart, axisEnd);
+  const peak = document.createElement('div');
+  peak.className = 'stat-peak';
+
+  const barSvg = buildHistogramSVG(field);
+  histRow.appendChild(barSvg.svg);
+
+  function update(buckets, range) {
+    const total = buckets.reduce((s, b) => s + (b[field] ?? 0), 0);
+    const peakVal = Math.max(0, ...buckets.map(b => b[field] ?? 0));
+    const statusCls = statusFn ? statusFn(total) : undefined;
+
+    value.className = 'stat-value' + (statusCls ? ' ' + statusCls : '');
+    value.textContent = tf('metric_hist_total', { n: total.toLocaleString() });
+    peak.textContent = tf('metric_hist_peak', { n: peakVal.toLocaleString() });
+    axisStart.textContent = buckets.length ? formatBucketTime(buckets[0].ts, range) : '';
+    barSvg.update(buckets, range, statusCls);
+  }
+
+  div.append(row, histRow, axis, peak);
+  return { el: div, update };
+}
+
+function formatCoverageNote(data) {
+  const cfg = { minute: 60, '15m': 900, hour: 3600, '24h': 86400, week: 604800 };
+  const requested = cfg[data.range] || 0;
+  if (data.coverage_seconds >= requested - data.bucket_seconds) return '';
+  return tf('metrics_coverage_short', { available: formatUptime(data.coverage_seconds) });
+}
+
+// Built once, on the first successful response, then reused for every
+// later poll AND every range switch - buildHistogramSVG's update() already
+// rebuilds its own bars when the bucket count changes, so there's no need
+// to tear down and recreate the tile shells themselves. This is what
+// removes the innerHTML-wipe flash entirely, not just on the 15s poll but
+// on a range click too.
+let metricsHistogramTiles = null; // field -> {update(buckets, range)}
+
+function buildMetricsHistogramGroup() {
+  const group = document.getElementById('metricsHistogramGroup');
+  group.innerHTML = '';
+  metricsHistogramTiles = {};
+  for (const g of METRICS_HISTOGRAM_GROUPS) {
+    const wrap = document.createElement('div');
+    wrap.className = 'metrics-group';
+    const label = document.createElement('div');
+    label.className = 'metrics-group-label';
+    label.textContent = t(g.labelKey);
+    if (g.hintKey) {
+      const hint = document.createElement('span');
+      hint.className = 'hint';
+      hint.textContent = ' (' + t(g.hintKey) + ')';
+      label.appendChild(hint);
+    }
+    const grid = document.createElement('div');
+    grid.className = 'hist-grid';
+    for (const spec of g.tiles) {
+      const tile = buildHistogramTile(spec);
+      metricsHistogramTiles[spec.field] = tile;
+      grid.appendChild(tile.el);
+    }
+    wrap.append(label, grid);
+    group.appendChild(wrap);
+  }
+}
+
+async function refreshMetricsHistory() {
+  // Every call is an independent async fetch (range switch, or the
+  // periodic poll) - nothing guarantees they resolve in the order they
+  // were sent. Stamp the range being requested and re-check it's still
+  // current once the response lands, so a slow response for a range the
+  // user already clicked away from can't clobber a newer, faster one that
+  // arrived first.
+  const requestedRange = currentMetricsRange;
+  let data;
+  try {
+    const res = await apiFetch('/metrics/history?range=' + encodeURIComponent(requestedRange));
+    data = await res.json();
+  } catch (err) {
+    return; // refreshMetricsCurrent's pill already surfaces auth/connection errors
+  }
+  if (requestedRange !== currentMetricsRange) return; // stale - a newer range switch has since superseded this
+  metricsHistoryData = data;
+  document.getElementById('metricsCoverageNote').textContent = formatCoverageNote(data);
+  if (!metricsHistogramTiles) buildMetricsHistogramGroup();
+  for (const field in metricsHistogramTiles) {
+    metricsHistogramTiles[field].update(data.buckets, data.range);
+  }
+}
+
+function initMetricsRangeSwitch() {
+  const el = document.getElementById('metricsRangeSwitch');
+  el.addEventListener('click', evt => {
+    const btn = evt.target.closest('.range-btn');
+    if (!btn || btn.dataset.range === currentMetricsRange) return;
+    currentMetricsRange = btn.dataset.range;
+    el.querySelectorAll('.range-btn').forEach(b => b.classList.toggle('range-btn-active', b === btn));
+    refreshMetricsHistory();
+  });
+}
+initMetricsRangeSwitch();
+
+function scheduleNextMetricsHistoryPoll() {
+  setTimeout(async () => {
+    await refreshMetricsHistory();
+    scheduleNextMetricsHistoryPoll();
+  }, METRICS_HISTORY_POLL_MS);
 }
 
 updateTargetLabels();
@@ -2152,6 +3575,9 @@ function scheduleNextPoll() {
 
 refreshStatus();
 scheduleNextPoll();
+refreshMetricsCurrent().then(ok => { if (ok) refreshMetricsHistory(); });
+scheduleNextMetricsPoll();
+scheduleNextMetricsHistoryPoll();
 </script>
 </body>
 </html>

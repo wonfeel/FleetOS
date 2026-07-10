@@ -1,7 +1,7 @@
 -- FleetOS app: runs on a tower computer (needs CC: Sable, on a Sub-Level).
 -- Same protocol/logic as the standalone raytower.lua "slave" role.
 
-local RaytowerAuth = dofile("apps/raytower/_raytower_auth.lua")
+local RaytowerAuth = dofile("apps/common/_signed_rednet.lua")
 
 local PROTOCOL = "raytower"
 
@@ -10,9 +10,9 @@ if fs.exists("config.lua") then
     local ok, c = pcall(dofile, "config.lua")
     if ok and type(c) == "table" then cfg = c end
 end
--- see raytower_auth.lua's header - must match the master's raytowerSecret
--- exactly, or every report this tower sends will be rejected as unsigned/
--- forged. "" (unset) keeps the historical unsigned behavior.
+-- see apps/common/_signed_rednet.lua's header - must match the master's
+-- raytowerSecret exactly, or every report this tower sends will be
+-- rejected as unsigned/forged. "" (unset) keeps the historical unsigned behavior.
 local RAYTOWER_SECRET = cfg.raytowerSecret or ""
 
 local ok, uid = pcall(function() return sublevel.getUniqueId() end)

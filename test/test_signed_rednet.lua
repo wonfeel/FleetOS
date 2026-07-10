@@ -1,11 +1,12 @@
--- Unit tests for apps/raytower/_raytower_auth.lua (signed/replay-
--- protected rednet traffic). Run with (cwd must be game/):
+-- Unit tests for apps/common/_signed_rednet.lua (signed/replay-protected
+-- rednet traffic, shared by apps/raytower/* and apps/common/
+-- fleetgateway.lua). Run with (cwd must be game/):
 --   cd game
---   lua ../test/test_raytower_auth.lua
+--   lua ../test/test_signed_rednet.lua
 
 dofile("../test/cc_mocks.lua")
 
-local Auth = dofile("apps/raytower/_raytower_auth.lua")
+local Auth = dofile("apps/common/_signed_rednet.lua")
 
 local function assertTrue(cond, msg)
     if not cond then error("FAIL: " .. msg, 2) end
@@ -44,13 +45,13 @@ end
 -- verification when a secret IS configured on the receiving side.
 do
     local payload = { type = "poll" }
-    local ok, err = Auth.verify(payload, "sekrit")
+    local ok = Auth.verify(payload, "sekrit")
     assertTrue(not ok, "expected unsigned payload to fail verification when a secret is set")
     print("Test 4: unsigned payload rejected when secret is set - PASS")
 end
 
 -- Test 5: empty secret ("") on BOTH sides means auth is off entirely -
--- backward compatible with a fleet that hasn't configured raytowerSecret.
+-- backward compatible with a fleet that hasn't configured a shared secret.
 do
     local payload = { type = "poll" }
     Auth.sign(payload, "")
@@ -69,7 +70,7 @@ do
     local oldTs = 1000000
     local payload = { type = "poll", ts = oldTs }
     payload.mac = Auth.mac("sekrit", Auth.canonicalize(payload))
-    local ok, err = Auth.verify(payload, "sekrit")
+    local ok = Auth.verify(payload, "sekrit")
     assertTrue(not ok, "expected stale timestamp to fail verification even with a matching mac")
     print("Test 6: stale timestamp rejected - PASS")
 end
@@ -91,4 +92,4 @@ do
     print("Test 7: canonicalize is construction-order-independent - PASS")
 end
 
-print("\nAll raytower_auth tests passed.")
+print("\nAll signed_rednet tests passed.")

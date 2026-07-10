@@ -139,12 +139,35 @@ while true do
             print("Usage: bridge <url> [key]  |  bridge clear")
 
         else
-            local _, restarted = fleetos.setBridge(parts[2], parts[3])
-            colorLine("bridge set to " .. parts[2] .. ((parts[3] and parts[3] ~= "") and " (with key)" or ""), colors.lime)
-            if restarted then
-                colorLine("fleetbridge restarted with new settings", colors.lime)
-            else
-                print("fleetbridge isn't running - start it with 'run fleetbridge'")
+            -- Opt-in guard: if the dashboard has set a shell PIN for this
+            -- node, repointing the bridge from right here needs it - see
+            -- apps/common/fleetbridge.lua's checkShellPin comment for why
+            -- the check itself happens on the bridge, not locally. Off by
+            -- default (fleetos.checkShellPin is nil until fleetbridge.lua
+            -- has run at least once, and even then reports required=false
+            -- unless a PIN was actually set for this node id).
+            local pinOk = true
+            if fleetos.checkShellPin then
+                local required = select(1, fleetos.checkShellPin(""))
+                if required then
+                    io.write("PIN required to change bridge - enter it: ")
+                    io.flush()
+                    local typed = read("*")
+                    local _, ok, err = fleetos.checkShellPin(typed or "")
+                    pinOk = ok
+                    if not pinOk then
+                        colorLine("wrong PIN" .. (err and (" (" .. err .. ")") or "") .. " - bridge not changed", colors.red)
+                    end
+                end
+            end
+            if pinOk then
+                local _, restarted = fleetos.setBridge(parts[2], parts[3])
+                colorLine("bridge set to " .. parts[2] .. ((parts[3] and parts[3] ~= "") and " (with key)" or ""), colors.lime)
+                if restarted then
+                    colorLine("fleetbridge restarted with new settings", colors.lime)
+                else
+                    print("fleetbridge isn't running - start it with 'run fleetbridge'")
+                end
             end
         end
 
@@ -172,6 +195,14 @@ while true do
         break
 
     elseif cmd then
-        print("unknown command: " .. cmd .. " (try 'help')")
+        -- Anything not matched above is tried as a real CraftOS program
+        -- (ls, cd, reboot, fleetos, ...) via the real shell.run, same
+        -- fallback fleetos.lua's own runShellLine (used by the dashboard's
+        -- Terminal) already has - this used to just print "unknown
+        -- command" unconditionally instead, silently never trying
+        -- shell.run at all despite this file's own help text above
+        -- claiming otherwise.
+        local ok, err = pcall(function() shell.run(line) end)
+        if not ok then colorLine("error: " .. tostring(err), colors.red) end
     end
 end

@@ -16,7 +16,7 @@ local mainCo = coroutine.create(function()
 end)
 
 local function step(...)
-    local ok, a, b = coroutine.resume(mainCo, ...)
+    local ok, a = coroutine.resume(mainCo, ...)
     if not ok then
         print("!! fleetos crashed: " .. tostring(a))
         return false
@@ -33,7 +33,7 @@ end
 if not step() then os.exit(1) end
 
 -- 2) feed a few generic events so the kernel loop ticks a couple of times
-for i = 1, 3 do
+for _ = 1, 3 do
     if not step("mouse_click", 1, 1, 1) then os.exit(1) end
 end
 
@@ -43,7 +43,7 @@ end
 if not step("timer", 1) then os.exit(1) end
 
 -- 4) a couple more idle ticks
-for i = 1, 2 do
+for _ = 1, 2 do
     if not step("mouse_click", 1, 1, 1) then os.exit(1) end
 end
 

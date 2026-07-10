@@ -160,14 +160,14 @@ fleetos.spawn("shell") -- respawn under the same name, still not yet resumed
 -- synchronously as part of handling this touch, BEFORE shell gets its own
 -- turn later in this same tick to run-and-die again. A SECOND event here
 -- would let that happen first and hide the very moment being checked.
-local clockRow = rowText(2)
-local clockMinStart = clockRow:find("%[_%]")
-resume("monitor_touch", "fakemon", clockMinStart + 1, 2) -- tap clock's [_] (harmless side effect, just to force this one redraw)
+local clockRowNow = rowText(2)
+local clockMinStart = clockRowNow:find("%[_%]")
+resume("monitor_touch", "fakemon", clockMinStart + 1, 2) -- tap clock's [_], harmless side effect, just to force this one redraw
 
--- alphabetically: clock, fleetbridge, raytower_master, raytower_slave,
--- shell - shell is the last row (row 6 with these 5 apps + header)
-local shellRow = rowText(6)
-assert(shellRow:find("shell"), "expected 'shell' on row 6, got: " .. shellRow)
+-- alphabetically: clock, fleetbridge, fleetgateway, raytower_master,
+-- raytower_slave, shell - shell is the last row (row 7 with these 6 apps + header)
+local shellRow = rowText(7)
+assert(shellRow:find("shell"), "expected 'shell' on row 7, got: " .. shellRow)
 assert(shellRow:find("%[_%]"), "respawned shell should show as running ([_] minimize), not minimized - got: " .. shellRow)
 assert(not shellRow:find("%[%^%]"), "respawned shell must NOT inherit the old minimized flag - got: " .. shellRow)
 print("Test 8: a stale minimized flag doesn't survive a natural death + respawn - PASS")

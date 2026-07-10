@@ -1,8 +1,12 @@
 -- Bridges THIS computer to your real Windows PC over HTTP. Run it on
 -- every computer in the fleet - there's no master/slave split, every node
 -- polls and executes commands for itself, identified by config.lua's
--- `id`. No modem/rednet needed for this - each node talks to your PC
--- directly.
+-- `id`. No modem/rednet is REQUIRED - by default each node talks to your
+-- PC directly. If a modem is present AND this fleet is running
+-- apps/common/fleetgateway.lua somewhere, poll/report can instead relay
+-- through a gateway over rednet - see the "Gateway-relay opt-in path"
+-- section further down for the full contract; a node with no modem, or a
+-- fleet with no gateways deployed, is completely unaffected.
 --
 -- CraftOS computers can only make OUTGOING http requests, so this app
 -- polls a small local server on your PC (windows/bridge_server.py) for
@@ -58,6 +62,11 @@
 --   force_release_monitor - un-claims the monitor regardless of which
 --                   app holds it, without killing that app - for a remote
 --                   "the screen is stuck" fix when a terminal isn't handy.
+--   drone_set     - flight setpoint (cmd.throttle/yawRate/moveX/moveY) for
+--                   apps/drone/drone_control.lua, delivered via
+--                   fleetos.publish("drone_set", ...) - a no-op if that
+--                   app isn't running on this node. See its own header for
+--                   the full control scheme; this is just the transport.
 --   configure     - bulk fleet config: push a new bridgeUrl/apiKey
 --                   and/or startup app list to this node - see
 --                   fleetos.setBridge/setStartup.
@@ -113,18 +122,40 @@
 -- node speaks, instead of just guessing from whichever optional fields
 -- happen to be present. Bump this if a /report or /poll response field is
 -- ever added/removed/repurposed in a way an older node or bridge couldn't
--- just ignore safely - so far every change here has been purely additive
--- (new optional fields), which is why this has never needed to move yet.
-local PROTOCOL_VERSION = 1
+-- just ignore safely.
+-- v2: report() now OMITS apps/appVersions/pos/effectiveConfig/monitor
+-- entirely when unchanged since the last successfully-delivered report
+-- (was: always sent in full every cycle), and output is a delta
+-- (getOutputSince) plus a separate always-present outputTail, not the last
+-- 150 lines every time. This is NOT safe against an old (pre-diet)
+-- bridge_server.py, which did `node["latest_report"] = body` - a
+-- wholesale replace that would silently wipe any field this node omits.
+-- A v2-or-later bridge merges instead (keeps the previous value for an
+-- omitted key) - see windows/bridge_server.py's /report handler.
+local PROTOCOL_VERSION = 2
 
 -- adaptive poll interval - a fleet of many nodes each hitting the
--- bridge every fixed 1s adds up linearly (50 nodes = 50 req/s minimum, even
--- when the fleet is completely idle). Stay fast right after real activity
--- (a command was just queued for this node - an admin is actively working),
+-- bridge adds up linearly (50 nodes = 50 req/s minimum, even when the
+-- fleet is completely idle). Stay fast right after real activity (a
+-- command was just queued for this node - an admin is actively working),
 -- fall back to a slower cadence once things go quiet, mirroring the
--- dashboard's own scheduleNextPoll adaptive-polling pattern.
-local POLL_INTERVAL_ACTIVE = 0.2
-local POLL_INTERVAL_IDLE = 2
+-- dashboard's own scheduleNextPoll adaptive-polling pattern. IDLE itself
+-- (cfg.pollIntervalIdle default, set further below once cfg exists) was
+-- 2.0s before the report payload-diet and the optional gateway-relay path
+-- both existed, then 0.5s - each individual request AND the bridge's
+-- total request count are cheap enough now that a shorter default is
+-- still safe. Note for anyone tuning this further in the Windows emulation
+-- specifically: this constant used to have no effect below ~1s at all
+-- (measured ~1.2s at the old 0.5s IDLE default, same as at 0.2s) - not a
+-- curl.exe subprocess cost (measured separately at ~50-90ms/call, not the
+-- bottleneck), but a bug in windows/craftos_shim.lua's os.startTimer,
+-- which computed fireAt from os.time() (whole seconds) + math.ceil(delay),
+-- silently flooring every sub-1-second sleep up to a full second. Fixed
+-- there (and in windows/run_sim_node.lua / run_fleetos.lua's driver loops,
+-- which also had a ~1s-floor `ping -n N` sleep for the same reason) - this
+-- constant now actually controls the real cadence in the Windows emulation
+-- too, not just in real CC:Tweaked.
+local POLL_INTERVAL_ACTIVE = 0.1
 local ACTIVE_WINDOW_SECONDS = 15 -- how long "recently got a command" still counts as active
 local POLL_INTERVAL = POLL_INTERVAL_ACTIVE -- kept as the base unit for POS_REFRESH_EVERY/HEARTBEAT_EVERY below
 
@@ -156,6 +187,10 @@ end
 local cfg = loadNodeConfig()
 local NODE_ID = loadIdOverride() or cfg.id or ("node_" .. os.getComputerID())
 local ROLE = cfg.role or "generic"
+
+-- see POLL_INTERVAL_ACTIVE's own comment above for the full rationale -
+-- configurable per-node for a fleet that wants to tune this further.
+local POLL_INTERVAL_IDLE = cfg.pollIntervalIdle or 0.2
 
 -- Written by the `bridge <url> [key]` shell command, or by
 -- windows/run_fleetos.lua/run_sim_node.lua's command-line-argument handling
@@ -193,11 +228,18 @@ end
 
 -- Builds headers for a request to `url`, merging in X-API-Key ONLY when
 -- `url` actually targets our own BASE_URL - never leaks the key to some
--- other host a "deploy" command's url might point at.
+-- other host a "deploy" command's url might point at. A plain prefix
+-- check isn't enough here: BASE_URL .. ".evil.com/x" also starts with
+-- BASE_URL as a string, so the character right after the prefix must be
+-- checked too - only "", "/" or "?" mean the match actually ends at a URL
+-- boundary instead of continuing into a different hostname.
 local function authHeaders(url, extra)
     local headers = extra or {}
     if API_KEY ~= "" and url:sub(1, #BASE_URL) == BASE_URL then
-        headers["X-API-Key"] = API_KEY
+        local boundary = url:sub(#BASE_URL + 1, #BASE_URL + 1)
+        if boundary == "" or boundary == "/" or boundary == "?" then
+            headers["X-API-Key"] = API_KEY
+        end
     end
     return headers
 end
@@ -232,6 +274,105 @@ end
 
 local function httpGet(url, headers) return httpRequest(url, nil, headers) end
 local function httpPost(url, body, headers) return httpRequest(url, body, headers) end
+
+-- fleetos.checkShellPin (used by apps/common/shell.lua's `bridge` command)
+-- lives in the kernel (fleetos.lua), not here - see that file's own
+-- comment for why registering it from this file's top-level code (only
+-- reached once THIS coroutine gets its first resume) isn't early enough.
+
+-- ============================================================
+-- Gateway-relay opt-in path - see apps/common/fleetgateway.lua's header
+-- for the full design/rationale. Short version: if a modem is present AND
+-- this node has actually heard a signed heartbeat from a gateway
+-- recently, poll()/report() below try relaying over rednet FIRST, falling
+-- back to the direct-HTTP calls above unchanged if that doesn't produce a
+-- result quickly. A node with no modem, or one that's never heard a
+-- gateway heartbeat (including every node in a fleet that isn't running
+-- fleetgateway.lua anywhere), never attempts this at all - poll()/
+-- report() behave EXACTLY as they did before this existed, at no extra
+-- cost (not even an extra rednet call - gatewayModem is nil, so
+-- pollForGatewayHeartbeat/gatewayIsLikelyAvailable short-circuit
+-- immediately).
+-- ============================================================
+
+local SignedRednet = dofile("apps/common/_signed_rednet.lua")
+local GATEWAY_SECRET = cfg.gatewaySecret or ""
+local GATEWAY_HEARTBEAT_PROTOCOL = "fleetgateway-heartbeat"
+local GATEWAY_RELAY_PROTOCOL = "fleetgateway-relay"
+local GATEWAY_HEARTBEAT_FRESHNESS = 5 -- seconds - older than this, treat as "no gateway around"
+local GATEWAY_RELAY_TIMEOUT = 0.5 -- seconds to wait for a gateway's relay response before falling back to direct HTTP this cycle
+
+local gatewayModem = peripheral.find("modem")
+if gatewayModem and not rednet.isOpen(peripheral.getName(gatewayModem)) then
+    rednet.open(peripheral.getName(gatewayModem))
+end
+
+local lastGatewayHeartbeatAt = nil -- os.epoch("utc") of the last heartbeat heard, nil = none yet
+
+-- Non-blocking (timeout=0): a real gateway broadcasts every
+-- gatewayHeartbeatInterval (default 1s), so missing one on any given
+-- cycle is harmless - the next cycle (or the one after) picks it up.
+-- Called every poll() regardless of whether a modem is even present -
+-- pollForGatewayHeartbeat itself is the thing that no-ops instantly when
+-- gatewayModem is nil.
+local function pollForGatewayHeartbeat()
+    if not gatewayModem then return end
+    local senderId, message = rednet.receive(GATEWAY_HEARTBEAT_PROTOCOL, 0)
+    if senderId and type(message) == "table" and SignedRednet.verify(message, GATEWAY_SECRET) then
+        lastGatewayHeartbeatAt = os.epoch("utc")
+    end
+end
+
+local function gatewayIsLikelyAvailable()
+    return gatewayModem ~= nil and lastGatewayHeartbeatAt ~= nil
+        and (os.epoch("utc") - lastGatewayHeartbeatAt) <= GATEWAY_HEARTBEAT_FRESHNESS * 1000
+end
+
+-- Returns commands (possibly an empty table - still a valid, successful
+-- result, NOT "try direct HTTP instead") on success, or nil if no gateway
+-- answered in time / gave a signed, valid response - nil is poll()'s
+-- signal to fall back to its normal direct-HTTP path this cycle.
+local function pollViaGateway()
+    if not gatewayIsLikelyAvailable() then return nil end
+    rednet.broadcast(SignedRednet.sign({ type = "poll", node = NODE_ID }, GATEWAY_SECRET), GATEWAY_RELAY_PROTOCOL)
+    local deadline = os.epoch("utc") + GATEWAY_RELAY_TIMEOUT * 1000
+    while true do
+        local remaining = (deadline - os.epoch("utc")) / 1000
+        if remaining <= 0 then return nil end
+        local senderId, message = rednet.receive(GATEWAY_RELAY_PROTOCOL, remaining)
+        if senderId and type(message) == "table" and message.type == "poll_result" and message.node == NODE_ID
+                and SignedRednet.verify(message, GATEWAY_SECRET) then
+            if not message.ok then return nil end
+            -- same X-Shell-Pin-Set contract a direct /poll response header
+            -- gives - relayed through the gateway as a plain field instead
+            -- (see fleetgateway.lua's relayPoll) so this node's own
+            -- shell-PIN-gate cache works identically either way.
+            if message.shellPinSet ~= nil then fleetos.markShellPinSet(message.shellPinSet) end
+            return message.commands or {}
+        end
+        -- anything else on this protocol (another node's relay traffic
+        -- overheard on the same broadcast channel) - keep waiting out the
+        -- remaining budget for OUR OWN response.
+    end
+end
+
+-- Returns true if a gateway relayed this report successfully, false
+-- otherwise (report()'s signal to fall back to direct HTTP this cycle).
+local function reportViaGateway(bodyJSON)
+    if not gatewayIsLikelyAvailable() then return false end
+    rednet.broadcast(SignedRednet.sign({ type = "report", node = NODE_ID, body = bodyJSON }, GATEWAY_SECRET),
+        GATEWAY_RELAY_PROTOCOL)
+    local deadline = os.epoch("utc") + GATEWAY_RELAY_TIMEOUT * 1000
+    while true do
+        local remaining = (deadline - os.epoch("utc")) / 1000
+        if remaining <= 0 then return false end
+        local senderId, message = rednet.receive(GATEWAY_RELAY_PROTOCOL, remaining)
+        if senderId and type(message) == "table" and message.type == "report_result" and message.node == NODE_ID
+                and SignedRednet.verify(message, GATEWAY_SECRET) then
+            return message.ok == true
+        end
+    end
+end
 
 -- "update"/"rename" both reboot right after sending a one-off ack (the
 -- normal end-of-cycle report() never runs for them, since os.reboot() cuts
@@ -535,6 +676,21 @@ local function runCommand(cmd)
         if not ok then return { error = err or "monitor_touch failed" } end
         return { ok = true }
 
+    elseif cmd.type == "drone_set" then
+        -- Just a transport: forwards the setpoint fields to whatever's
+        -- listening for the "drone_set" topic. Deliberately doesn't
+        -- validate ranges here (drone_control.lua's motor_mixer already
+        -- clamps everything) or check that drone_control is even running -
+        -- publish() is a no-op broadcast, so this always succeeds even if
+        -- there's no drone app on this node to receive it.
+        fleetos.publish("drone_set", {
+            throttle = cmd.throttle,
+            yawRate = cmd.yawRate,
+            moveX = cmd.moveX,
+            moveY = cmd.moveY,
+        })
+        return { ok = true }
+
     elseif cmd.type == "force_release_monitor" then
         -- belt-and-suspenders (see fleetos.lua's forceReleaseMonitor
         -- comment): un-sticks a claimed monitor remotely without needing to
@@ -673,8 +829,26 @@ end
 -- Windows shim, wrong key, ...) - the loop below only prints err, so this
 -- return value is what makes that visible at all.
 local function poll()
+    pollForGatewayHeartbeat()
+    local viaGateway = pollViaGateway()
+    if viaGateway then return viaGateway, nil end
+
     local resp, httpErr = httpGet(BASE_URL .. "/poll?node=" .. urlEncode(NODE_ID), authHeaders(BASE_URL))
     if not resp then return {}, httpErr or "request failed" end
+    -- Refreshes the kernel's LOCAL cache of "does this node have a shell
+    -- PIN" from the response header bridge_server.py's /poll always sends
+    -- - every poll cycle, at zero extra network cost - so fleetos.lua's
+    -- terminate handler never has to make its own round trip just to find
+    -- out whether Ctrl+T needs gating at all. See fleetos.lua's
+    -- markShellPinSet comment for why that matters. (pollViaGateway above
+    -- gets the same signal relayed as a plain `shellPinSet` field instead
+    -- of a response header when it's the one that succeeds.)
+    local respHeaders = resp.getResponseHeaders() or {}
+    for name, value in pairs(respHeaders) do
+        if name:lower() == "x-shell-pin-set" then
+            fleetos.markShellPinSet(value == "1")
+        end
+    end
     local body = resp.readAll()
     resp.close()
     local ok, commands = pcall(textutils.unserializeJSON, body)
@@ -707,6 +881,35 @@ local function refreshPosIfDue()
 end
 
 -- Returns err (nil on success) - same reasoning as poll() above.
+-- Payload diet: report() used to resend apps/appVersions/pos/
+-- effectiveConfig/monitor in FULL every single cycle (as often as every
+-- POLL_INTERVAL_ACTIVE = 0.2s while active) even when nothing had changed,
+-- and `output` resent the last 150 lines every time instead of just what's
+-- new. These locals track what was last SUCCESSFULLY delivered (updated
+-- only after httpPost actually succeeds, never on a failed/lost attempt -
+-- otherwise a single dropped report would permanently omit data the
+-- bridge never actually received). A field is included in the outgoing
+-- body only when it differs from its "last sent" value; the bridge's
+-- merge logic (see windows/bridge_server.py's /report handler) keeps
+-- whatever it already had for anything omitted.
+local lastOutputCursor = 0
+local lastMonitorHash = nil
+local lastAppsJSON = nil
+local lastAppVersionsJSON = nil
+local lastPosJSON = nil
+local lastEffectiveConfigJSON = nil
+
+-- Bounds how stale a bridge restart can leave things: bridge_server.py
+-- does NOT persist latest_report across a restart (by design - see its own
+-- comment), but THIS node's "last sent" locals above survive fine (this
+-- process never restarted) - without a periodic full resend, a field this
+-- node correctly considers unchanged would stay silently absent from the
+-- bridge's view forever after a bridge restart, not just stale. Forcing
+-- every cache to look "unsent" periodically re-includes everything, same
+-- as this node's very first report ever (all the locals start nil/0 too).
+local FULL_RESYNC_EVERY = math.ceil(60 / POLL_INTERVAL)
+local ticksSinceFullResync = 0
+
 local function report(results)
     local apps = {}
     -- name -> short content checksum for every currently-running app,
@@ -722,35 +925,103 @@ local function report(results)
 
     refreshPosIfDue()
 
-    local body = textutils.serializeJSON({
+    ticksSinceFullResync = ticksSinceFullResync + 1
+    if ticksSinceFullResync >= FULL_RESYNC_EVERY then
+        lastMonitorHash, lastAppsJSON, lastAppVersionsJSON = nil, nil, nil
+        lastPosJSON, lastEffectiveConfigJSON = nil, nil
+        ticksSinceFullResync = 0
+    end
+
+    local newOutputLines, newOutputCursor, outputTail = fleetos.getOutputSince(lastOutputCursor)
+
+    -- nil (omitted) if no monitor has ever been found/drawn to this
+    -- session - the dashboard shows "no monitor attached" for that. See
+    -- fleetos.lua's "Monitor capture" section.
+    local monitorSnapshot = fleetos.getMonitorSnapshot()
+    local monitorJSON = monitorSnapshot and textutils.serializeJSON(monitorSnapshot)
+    local monitorHash = monitorJSON and fleetos.checksum(monitorJSON)
+
+    local appsJSON = textutils.serializeJSON(apps)
+    local appVersionsJSON = textutils.serializeJSON(appVersions)
+    local posJSON = lastPos and textutils.serializeJSON(lastPos)
+    -- config.lua deliberately never gets rewritten by bridgeOverride/
+    -- startupOverride (would risk clobbering an admin's own comments/
+    -- formatting) - which means config.lua's own bridgeUrl/startup fields
+    -- can silently drift out of sync with what's ACTUALLY in effect.
+    -- Reporting the resolved/effective values here (not just config.lua's
+    -- raw ones) makes that divergence visible to the dashboard/an admin
+    -- instead of hidden.
+    local effectiveConfig = { bridgeUrl = BASE_URL, startup = fleetos.getStartupOverride() }
+    local effectiveConfigJSON = textutils.serializeJSON(effectiveConfig)
+
+    local payload = {
         id = NODE_ID,
         role = ROLE,
         protocolVersion = PROTOCOL_VERSION,
-        apps = apps,
-        appVersions = appVersions,
         results = results,
-        output = fleetos.getOutput(150),
-        pos = lastPos,
-        -- nil (omitted) if no monitor has ever been found/drawn to this
-        -- session - the dashboard shows "no monitor attached" for that.
-        -- See fleetos.lua's "Monitor capture" section.
-        monitor = fleetos.getMonitorSnapshot(),
-        -- config.lua deliberately never gets rewritten by bridgeOverride/
-        -- startupOverride (would risk clobbering an admin's own comments/
-        -- formatting) - which means config.lua's own bridgeUrl/startup
-        -- fields can silently drift out of sync with what's ACTUALLY in
-        -- effect. Reporting the resolved/effective values here (not just
-        -- config.lua's raw ones) makes that divergence visible to the
-        -- dashboard/an admin instead of hidden - see effectiveConfig below.
-        effectiveConfig = {
-            bridgeUrl = BASE_URL,
-            startup = fleetos.getStartupOverride(), -- nil if no override is active (using config.lua's own startup as-is)
-        },
-    })
+        -- always present (even ""/empty) - see getOutputSince's own
+        -- comment for why the in-progress line can't be delta'd like a
+        -- completed one.
+        outputTail = outputTail,
+        -- true only under windows/craftos_shim.lua's Windows emulation
+        -- (which sets this global, see its own header comment) - never
+        -- present/true on a real in-game computer. Lets the dashboard mark
+        -- test/dev nodes so they're not mistaken for real fleet members.
+        emulated = _G.CRAFTOS_EMULATION == true,
+    }
+    if #newOutputLines > 0 then
+        payload.output = newOutputLines
+        -- bridge_server.py's /report handler needs this to append (not
+        -- overwrite) AND to reject an at-least-once HTTP retry resending
+        -- this exact same delta twice - see its own _merge_report comment.
+        payload.outputCursor = newOutputCursor
+    end
+    if monitorHash ~= lastMonitorHash then payload.monitor = monitorSnapshot end
+    if appsJSON ~= lastAppsJSON then payload.apps = apps end
+    if appVersionsJSON ~= lastAppVersionsJSON then payload.appVersions = appVersions end
+    if posJSON ~= lastPosJSON then payload.pos = lastPos end
+    if effectiveConfigJSON ~= lastEffectiveConfigJSON then payload.effectiveConfig = effectiveConfig end
+    -- Set by apps/common/fleetgateway.lua (via fleetos.setShared) if it's
+    -- ALSO running on this node - nil (and so omitted here) on every
+    -- regular, non-gateway node, which never touches this shared key at
+    -- all. Surfaces "am I the current gateway leader" on the dashboard's
+    -- Status tab without bridge_server.py needing any gateway-topology
+    -- awareness of its own.
+    local gatewayIsLeader = fleetos.getShared("gatewayIsLeader")
+    if gatewayIsLeader ~= nil then payload.isGatewayLeader = gatewayIsLeader end
+    -- Set by apps/drone/drone_control.lua (via fleetos.setShared) if it's
+    -- running on this node - nil (and omitted) on every non-drone node,
+    -- same pattern as isGatewayLeader above. dashboard.html shows the
+    -- drone control panel only for a node that reports this.
+    local droneState = fleetos.getShared("droneState")
+    if droneState ~= nil then payload.drone = droneState end
+
+    local body = textutils.serializeJSON(payload)
+
+    -- only advance the "already told the bridge" caches once the report
+    -- has actually been delivered (via EITHER path below) - see their own
+    -- comment above for why a failed/lost attempt must not advance them.
+    local function markDelivered()
+        lastOutputCursor = newOutputCursor
+        lastMonitorHash = monitorHash
+        lastAppsJSON = appsJSON
+        lastAppVersionsJSON = appVersionsJSON
+        lastPosJSON = posJSON
+        lastEffectiveConfigJSON = effectiveConfigJSON
+    end
+
+    if reportViaGateway(body) then
+        markDelivered()
+        return nil
+    end
 
     local resp, httpErr = httpPost(BASE_URL .. "/report?node=" .. urlEncode(NODE_ID), body,
         authHeaders(BASE_URL, { ["Content-Type"] = "application/json" }))
-    if resp then resp.close(); return nil end
+    if resp then
+        resp.close()
+        markDelivered()
+        return nil
+    end
     return httpErr or "request failed"
 end
 

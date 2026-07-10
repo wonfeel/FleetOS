@@ -56,6 +56,7 @@ paths:
                         latest_report: { type: object, nullable: true }
                         seconds_since_report: { type: number, nullable: true }
                         folder: { type: string }
+                        shellPinSet: { type: boolean, description: "true if a shell PIN is set for this node (see /admin/shell_pin) - never the PIN itself" }
   /poll:
     get:
       summary: A node's own poll for queued commands (called by fleetbridge.lua, not the dashboard)
@@ -67,9 +68,23 @@ paths:
       responses:
         "200":
           description: Array of queued commands for this node
+          headers:
+            X-Shell-Pin-Set:
+              description: "\"1\" if a shell PIN is set for this node (see /admin/shell_pin), else \"0\""
+              schema: { type: string }
   /report:
     post:
       summary: A node's status report after every poll cycle (called by fleetbridge.lua)
+      description: >
+        protocolVersion >= 2: apps/appVersions/pos/effectiveConfig/monitor are
+        each OMITTED when unchanged since that node's last successfully-
+        delivered report (merged over the previous report server-side, not
+        replaced) - see bridge_server.py's /report handler. `output` is a
+        DELTA of newly-completed lines (appended, capped at
+        MAX_OUTPUT_LINES_STORED), paired with an `outputCursor` integer the
+        handler uses to ignore an at-least-once HTTP retry resending the same
+        delta twice. `outputTail` is always present - the current
+        not-yet-newline-terminated line, replaced (not appended) each time.
       parameters:
         - name: node
           in: query
@@ -146,6 +161,100 @@ paths:
                 folder: { type: string, description: "\"\" clears the assignment" }
       responses:
         "200": { description: OK }
+  /admin/shell_pin:
+    post:
+      summary: Set or clear the PIN apps/common/shell.lua requires locally before a `bridge` override
+      parameters:
+        - $ref: "#/components/parameters/DashboardHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [nodes]
+              properties:
+                nodes: { type: array, items: { type: string }, description: "explicit node ids - dashboard resolves \"all\" client-side" }
+                pin: { type: string, description: "\"\" clears the PIN for the given nodes" }
+      responses:
+        "200": { description: OK }
+  /admin/delete_node:
+    post:
+      summary: Remove nodes from the fleet view (bridge-side only - a still-polling node reappears on its next report)
+      parameters:
+        - $ref: "#/components/parameters/DashboardHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [nodes]
+              properties:
+                nodes: { type: array, items: { type: string } }
+      responses:
+        "200": { description: OK }
+  /admin/spawn_sim_node:
+    post:
+      summary: Start a local Windows-simulated computer as a real subprocess (dev/testing only)
+      description: >
+        Disabled unless the bridge was started with FLEET_ENABLE_SIM_SPAWN=1 -
+        this starts a real `lua` OS process (windows/run_sim_node.lua), same
+        risk category as POST /compute/{name}. Creates windows/sim/{id}/ (a
+        copy of fleetos.lua/apps/ plus a generated config.lua) the first
+        time a given id is used; reusing an id re-launches that same folder.
+      parameters:
+        - $ref: "#/components/parameters/DashboardHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id]
+              properties:
+                id: { type: string, description: "becomes the node id AND the windows/sim/{id} folder name - letters/digits/underscore/hyphen only" }
+                role: { type: string, description: "free-form label, defaults to \"generic\"" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  id: { type: string }
+                  pid: { type: integer }
+                  created: { type: boolean, description: "true if windows/sim/{id}/ was just created" }
+        "403": { description: sim node spawning disabled (FLEET_ENABLE_SIM_SPAWN not set) }
+        "409": { description: a sim node with this id is already running }
+  /shell_pin_check:
+    post:
+      summary: Called by apps/common/shell.lua (not the dashboard) to verify a locally-typed PIN before a `bridge` override
+      parameters:
+        - name: node
+          in: query
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                pin: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  required: { type: boolean, description: "false if no PIN is set for this node" }
+                  ok: { type: boolean }
   /admin/reload:
     post:
       summary: - save state and re-exec the bridge process in place to pick up a code update

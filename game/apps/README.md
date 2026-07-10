@@ -40,7 +40,7 @@ minimizable, everything the built-in apps (`clock`, `fleetbridge`) get.
   "send this to the dashboard" mechanism.
 - **A leading underscore in a filename means "shared helper module, not a
   runnable app"** - `dofile()`'d directly by whatever needs it (see
-  `apps/raytower/_raytower_auth.lua` for a real example), excluded from
+  `apps/common/_signed_rednet.lua` for a real example), excluded from
   `fleetos.listAvailableApps()`'s listing. Use this for code shared between
   two or more apps instead of copy-pasting it.
 

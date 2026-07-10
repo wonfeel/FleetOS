@@ -30,19 +30,17 @@ windows/bridge_state.json
 # without setting your own) - a per-install secret, never source
 windows/bridge_key.txt
 
-# Per-node output logs collected server-side (Ад6) - runtime data, not source
+# All runtime logs (bridge_server.py's own rotating log, per-node report
+# output, sim-node console capture) live under this one root, split into
+# bridge/nodes/sim subdirectories - see bridge_server.py's LOGS_DIR comment.
+# Runtime data, never source.
 windows/logs/
 
 # Python bytecode cache
 __pycache__/
 *.pyc
 
-# bridge_server.py's rotating log file (bridge.log for the default port 8787,
-# bridge-<port>.log for any other port - see LOG_PATH's comment), stdout
-# capture, and background-mode PID file
-windows/bridge.log*
-windows/bridge-*.log*
-windows/bridge_stdout.log
+# run_bridge_background.bat's PID file (background-mode launch only)
 windows/bridge.pid
 
 # Compiled compute-offload binaries (e.g. triangulation.cpp -> .exe) - build

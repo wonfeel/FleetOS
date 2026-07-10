@@ -1,0 +1,87 @@
+name: CI
+
+# Runs on every push and PR. Three jobs, split by what they actually need:
+#  - python-tests: bridge_server.py's own unit + load tests - these only
+#    need Python (no Lua at all), and bridge_server.py is genuinely
+#    cross-platform (stdlib only, no shell=True, every path via
+#    os.path.join - see the Dockerfile's own header comment), so this runs
+#    on both ubuntu and windows to actually prove that, not just assume it.
+#  - lua-tests: the Lua-side test suite (test/test_*.lua) plus luacheck -
+#    these don't touch craftos_shim.lua's Windows-only bits at all
+#    (they run under test/cc_mocks.lua's plain in-memory mocks), so a
+#    cheap ubuntu runner is enough.
+#  - windows-integration: test_integration.py, the one test that spawns a
+#    REAL craftos_shim.lua-driven sim-node subprocess - craftos_shim.lua
+#    shells out to cmd.exe/ping.exe/powershell.exe by design (see its own
+#    header comment), so this can ONLY run on windows-latest.
+on:
+  push:
+  pull_request:
+
+jobs:
+  python-tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install lint tool
+        run: pip install flake8
+      - name: Lint (windows/*.py)
+        # Must run FROM windows/ - flake8 only discovers setup.cfg in the
+        # current working directory (never a subdirectory), so `flake8
+        # windows` from the repo root silently falls back to flake8's own
+        # defaults instead of this project's (see windows/setup.cfg's own
+        # comment for the verified proof).
+        working-directory: windows
+        run: flake8 .
+      - name: Unit + load tests
+        working-directory: windows
+        run: python -m unittest test_bridge_server test_bridge_server_load -v
+
+  lua-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Lua 5.4
+        uses: leafo/gh-actions-lua@v10
+        with:
+          luaVersion: "5.4.6"
+      - name: Install luacheck
+        uses: leafo/gh-actions-luarocks@v4
+      - run: luarocks install luacheck
+      - name: Lint (game/, test/)
+        run: luacheck game test
+      - name: Run Lua test suite
+        working-directory: game
+        run: |
+          set -e
+          for f in ../test/test_*.lua; do
+            echo "=== $f ==="
+            lua "$f"
+          done
+
+  windows-integration:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      # leafo/gh-actions-lua builds Lua from source on Windows (no
+      # precompiled release for this runner image) and needs cl.exe on
+      # PATH to do it - windows-latest doesn't put MSVC there by default,
+      # only this action's own dev-prompt setup does.
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Install Lua 5.4
+        uses: leafo/gh-actions-lua@v10
+        with:
+          luaVersion: "5.4.6"
+      - name: Real sim-node integration test
+        working-directory: windows
+        run: python -m unittest test_integration -v

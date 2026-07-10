@@ -21,10 +21,11 @@ Every computer is equal - there is no master/slave.
   (`dashboard.html`, open `http://127.0.0.1:8787/` once the bridge is
   running) used to control the fleet remotely, plus a Windows-only local
   simulation (`craftos_shim.lua`) for developing/testing without Minecraft
-  at all.
+  at all - `windows/run_sim.bat` starts the bridge and two simulated nodes
+  together, then opens the dashboard.
 - [`test/`](test/) - unit tests, runnable without Minecraft (`cd game && lua ../test/<name>.lua`).
 - [`docs/`](docs/) - every human-facing guide and the technical reference -
-  see [`docs/README.md`](docs/README.md) for the index.
+  see [`docs/README.html`](docs/README.html) for the index.
 - [`reference/`](reference/) - third-party material kept locally for
   cross-checking real behavior (the CC:Tweaked mod source) - not part of
   this project, gitignored, safe to delete and re-fetch if you don't need it.
@@ -32,7 +33,12 @@ Every computer is equal - there is no master/slave.
 ## Quick start
 
 1. `cd windows && python bridge_server.py` (or `start_bridge.bat`) - starts
-   the bridge on `http://127.0.0.1:8787`.
+   the bridge on `http://127.0.0.1:8787`. Or, on any OS: `docker compose up`
+   (see [`Dockerfile`](Dockerfile)/[`docker-compose.yml`](docker-compose.yml) -
+   same bridge+dashboard, no local Python install needed, and it's also what
+   actually contains `windows/compute/*.py` compute scripts to the
+   container instead of running them with a normal user's full host
+   privileges - see the compose file's own header comment).
 2. Open that URL in a browser - that's the dashboard.
 3. On a fresh CC:Tweaked computer in-game: `wget http://<your-pc-ip>:8787/install.lua install` then `install`.
 4. The new computer shows up in the dashboard within a few seconds.

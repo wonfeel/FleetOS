@@ -8,7 +8,7 @@
 -- meant to run under the kernel).
 
 local Triangulator = dofile("triangulation.lua")
-local RaytowerAuth = dofile("apps/raytower/_raytower_auth.lua")
+local RaytowerAuth = dofile("apps/common/_signed_rednet.lua")
 
 local PROTOCOL = "raytower"
 local DATA_FILE = "rays.dat"
@@ -45,8 +45,8 @@ local qsignCfg = cfg.raytowerQSign or { 1, 1, 1 }
 local tri = Triangulator.new(forward, qsignCfg)
 
 -- shared secret for signing/verifying rednet traffic - see
--- raytower_auth.lua's header for exactly what this does and doesn't
--- protect against. "" (unset) means unsigned, matching previous behavior -
+-- apps/common/_signed_rednet.lua's header for exactly what this does and
+-- doesn't protect against. "" (unset) means unsigned, matching previous behavior -
 -- set the SAME raytowerSecret in both the master's and every slave's
 -- config.lua to turn this on for a fleet.
 local RAYTOWER_SECRET = cfg.raytowerSecret or ""

@@ -14,7 +14,12 @@ return {
     -- makes this computer controllable from the dashboard - put it on
     -- every node you want to reach remotely. Add "raytower_master" (on
     -- exactly one computer) or "raytower_slave" (on tower computers) only
-    -- if you're using the triangulation feature.
+    -- if you're using the triangulation feature. Add "fleetgateway" (on
+    -- 2-5 trusted computers, see gatewaySecret below) only if you're using
+    -- the gateway cluster feature - see docs/ARCHITECTURE_GATEWAY_CLUSTER.html.
+    -- Add "drone_control" (needs apps/drone/_drone_config.lua's hardware
+    -- mapping filled in for THIS drone, via a `drone = {...}` table below)
+    -- only on a physical drone node - see that app's own header comment.
     startup = {
         "shell",
         "fleetbridge",
@@ -37,6 +42,15 @@ return {
     -- set FLEET_BRIDGE_KEY (the default - no auth at all).
     -- apiKey = "some-secret-key",
 
+    -- Optional: how often (seconds) this node polls/reports while idle
+    -- (no recent command) - see fleetbridge.lua's own comment on
+    -- POLL_INTERVAL_ACTIVE for the full rationale. Default 0.5s is safe
+    -- for most fleets now that reports are diffed (only changed fields
+    -- sent) and gateways (apps/common/fleetgateway.lua) can absorb load -
+    -- raise this back toward the old 2.0s default for a very large fleet
+    -- hitting the bridge with no gateways deployed at all.
+    -- pollIntervalIdle = 0.5,
+
     -- Optional: raytower calibration values (found via the standalone
     -- raytower.lua's "master calibrate" command). Only read by
     -- apps/raytower_master.lua.
@@ -45,7 +59,7 @@ return {
 
     -- Optional: shared secret for raytower's rednet traffic - set the
     -- SAME value here on the master and every slave tower to turn on
-    -- packet signing + replay protection (see apps/raytower/raytower_auth.lua).
+    -- packet signing + replay protection (see apps/common/_signed_rednet.lua).
     -- Left unset, rednet traffic is unsigned (any player with a modem in
     -- range could forge/replay packets) - fine for a quick test, not
     -- recommended for a real multiplayer server.
@@ -57,6 +71,26 @@ return {
     -- backs off further on its own once the solved position is stable -
     -- see raytower_master.lua's own comment.
     -- raytowerPollInterval = 1.0,
+
+    -- Optional: shared secret for the gateway cluster feature's rednet
+    -- traffic (apps/common/fleetgateway.lua's leader-election heartbeats +
+    -- relayed poll/report) - set the SAME value here on every gateway AND
+    -- every regular node that should be able to reach them, or this
+    -- computer's traffic on that protocol is unsigned. See
+    -- docs/ARCHITECTURE_GATEWAY_CLUSTER.html. A regular node's
+    -- fleetbridge.lua only ever tries the gateway-relay path after it's
+    -- actually heard a gateway heartbeat nearby - if you never run
+    -- fleetgateway.lua anywhere in your fleet, nothing changes for you at
+    -- all, this field included.
+    -- gatewaySecret = "some-other-shared-secret",
+
+    -- Optional: only for apps/common/fleetgateway.lua - how often gateways
+    -- broadcast a leader-election heartbeat, and how long without hearing
+    -- a higher-priority one before a gateway declares itself leader.
+    -- Defaults (1.0s / 3.0s) are fine for a real deployment; only worth
+    -- touching for testing.
+    -- gatewayHeartbeatInterval = 1.0,
+    -- gatewayElectionTimeout = 3.0,
 
     -- Optional override: physical size of this computer's attached
     -- monitor, in MONITOR BLOCKS (not characters), e.g. { w = 7, h = 4 }

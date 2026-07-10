@@ -60,11 +60,20 @@ Endpoints:
                             afterwards to push it out)
     GET  /poll?node=<id>   - each node's fleetbridge.lua calls this with its
                              own id; returns & clears commands queued for it
-                             (or for "*") and auto-registers the node
+                             (or for "*") and auto-registers the node. Also
+                             sets an X-Shell-Pin-Set response header (see
+                             /admin/shell_pin) so fleetbridge.lua can cache
+                             locally whether Ctrl+T needs a PIN, without a
+                             separate request
     POST /report?node=<id> - each node's fleetbridge.lua calls this after
                              every poll; stores that node's latest status
                              (running apps, recent terminal output) + indexes
-                             command results by id
+                             command results by id. protocolVersion >= 2
+                             sends most fields only when changed since the
+                             last successful report (merged, not replaced -
+                             see the handler) and `output` as an
+                             outputCursor-gated delta instead of resending
+                             the full window every cycle
     GET  /status       - dashboard/fleetctl.py call this; every known node's
                          latest status, keyed by node id
     GET  /result/<id>  - dashboard polls this for a specific command's result
@@ -75,6 +84,26 @@ Endpoints:
     POST /node_folder  - {node, folder} assigns a node to a dashboard-side
                          folder ("" clears it) - persisted to node_meta.json,
                          exposed back via /status's per-node `folder` field
+    POST /admin/shell_pin - {nodes: [...], pin} sets (or, pin="", clears) the
+                         PIN apps/common/shell.lua requires locally before a
+                         `bridge <url> [key]` override on those node ids -
+                         persisted to node_meta.json alongside folders
+    POST /shell_pin_check?node=<id> - called by apps/common/fleetbridge.lua
+                         (not the dashboard) to verify a locally-typed PIN
+                         against the hash set via /admin/shell_pin above;
+                         {"required": false, "ok": true} if no PIN is set
+                         for that node at all (the default)
+    POST /admin/delete_node - {nodes: [...]} removes those node ids from
+                         the fleet view (status, folder, shell PIN) -
+                         bridge-side only, a still-polling node reappears
+                         on its next report
+    POST /admin/spawn_sim_node - {id, role} starts a local Windows-
+                         simulated computer (windows/sim/<id>/, driven by
+                         run_sim_node.lua) as a real subprocess of this
+                         bridge process - dev/testing only, disabled unless
+                         FLEET_ENABLE_SIM_SPAWN=1 is set (same reasoning as
+                         COMPUTE_ENABLED: it's OS code execution, just of
+                         our own known script rather than an arbitrary one)
     POST /compute/<name>[?node=<id>] - runs windows/compute/<name>.py (or
                          <name>.exe if no .py exists) as a subprocess, feeding
                          the JSON request body via stdin and returning
@@ -147,6 +176,24 @@ import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit, parse_qs
 
+# Path resolution/containment/name-validation helpers (resolve_pc_path,
+# resolve_compute_script, resolve_app_path, PC_ROOTS, GAME_DIR/APPS_DIR/
+# COMPUTE_DIR/etc, and friends) live in bridge_paths.py - genuinely
+# self-contained (explicit args in, value out, none of them touch this
+# file's mutable fleet state), split out to shrink what you need to read to
+# understand request handling here. Named import, not `import *` -
+# bridge_paths.py's own SCRIPT_DIR isn't in this list on purpose, so it
+# never shadows this file's own SCRIPT_DIR (defined separately below).
+from bridge_paths import (  # noqa: F401
+    GAME_DIR, APPS_DIR, FLEETOS_PATH, INSTALL_PATH, TRIANGULATION_PATH,
+    DASHBOARD_PATH, DOCS_DIR, SIM_DIR, RUN_SIM_NODE_PATH, COMPUTE_DIR,
+    PC_ROOTS, APP_GROUPS,
+    resolve_compute_script, list_compute_script_names, is_valid_compute_name,
+    is_valid_sim_node_id, is_valid_sim_role, lua_quote,
+    resolve_pc_path, list_pc_entries,
+    list_app_names, list_apps_grouped, resolve_app_path,
+)
+
 # Opt-in: unset/empty means no auth at all (the historical, still-default
 # behavior for a plain 127.0.0.1 bridge). Set this before starting the
 # server to require a matching X-API-Key header on every request.
@@ -168,6 +215,13 @@ READONLY_API_KEY = os.environ.get("FLEET_BRIDGE_READONLY_KEY", "")
 # host PC (not just the Minecraft computers).
 COMPUTE_ENABLED = os.environ.get("FLEET_ENABLE_COMPUTE") == "1"
 
+# POST /admin/spawn_sim_node starts a real `lua` OS process (windows/
+# run_sim_node.lua, see windows/sim/) - only meaningful for local dev/
+# testing (a Windows-emulated stand-in for a real in-game computer), but
+# it's still spawning a subprocess on the host PC, so it gets the same
+# opt-in treatment as COMPUTE_ENABLED above rather than being always-on.
+SIM_SPAWN_ENABLED = os.environ.get("FLEET_ENABLE_SIM_SPAWN") == "1"
+
 # basic health/metrics - previously the only way to guess at bridge
 # health was to poll /status and eyeball whether nodes look recent, and there
 # were no counters at all to notice a degrading system (rising error rate,
@@ -175,19 +229,257 @@ COMPUTE_ENABLED = os.environ.get("FLEET_ENABLE_COMPUTE") == "1"
 START_TIME = time.time()
 HEALTH_RECENT_SECONDS = 30  # a node counts as "reporting recently" for /health if its last report is within this
 
-metrics = {
-    "commands_queued_total": 0,
-    "reports_received_total": 0,
-    "polls_served_total": 0,
-    "results_fetched_total": 0,
-    "rate_limited_total": 0,
-    "http_errors_total": 0,
+# ---- GET /metrics/history - reconstructs the same counters as
+# FleetState.metrics, bucketed over time, straight from bridge.log (+ its
+# rotated bridge.log.1, .2, ... siblings) instead of a live in-process
+# accumulator. FleetState.metrics itself only ever holds the CURRENT
+# cumulative total since this process started - no way to ask "what was the
+# poll rate 20 minutes ago", and a dashboard reload loses even the
+# client-side history it had been building up. The log already has
+# everything needed (timestamp, method, path, status on every request)
+# since BaseHTTPRequestHandler's default log_request call - this just
+# re-derives the same per-request classification state.metric_inc()'s call
+# sites use, from that text instead of from a live counter. HONEST LIMIT:
+# only covers whatever log retention is
+# actually on disk (RotatingFileHandler's backupCount below) - a busy fleet
+# rotates through that faster than a quiet one, so "week" can come back
+# short; `coverage_seconds` in the response tells the caller exactly how
+# far back real data actually goes, instead of silently zero-filling.
+METRICS_HISTORY_RANGES = {
+    # range key -> (total span in seconds, bucket width in seconds)
+    "minute": (60, 5),
+    "15m": (900, 30),
+    "hour": (3600, 60),
+    "24h": (86400, 900),
+    "week": (604800, 7200),
 }
+METRICS_HISTORY_FIELDS = (
+    "polls_served", "reports_received", "commands_queued",
+    "results_fetched", "rate_limited", "http_errors",
+)
+# Matches log_message's own output format below (Handler.log_message just
+# logs `fmt % args` unchanged, and BaseHTTPRequestHandler's default
+# log_request builds that from self.requestline/code/size) - e.g.:
+#   2026-07-09 02:26:48,122 [bridge] "POST /report?node=X HTTP/1.1" 200 -
+# Path is captured only up to the first "?"/space/quote - enough to tell
+# routes apart (/poll vs /report vs /command) without caring about query
+# strings, matching how the live counters key off self.path (already
+# stripped of its query string by do_GET before any _metric_inc call).
+_LOG_LINE_RE = re.compile(
+    r'^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}),\d+ \[bridge\] "(\S+) ([^\s"?]+)[^"]*" (\d+)')
 
 
-def _metric_inc(name, n=1):
-    with lock:
-        metrics[name] = metrics.get(name, 0) + n
+def _categorize_log_line(method, path, status):
+    # Deliberately mirrors the exact conditions at each state.metric_inc() call
+    # site above (see /poll, /report, /command, /result/<id> handlers, and
+    # _check_rate_limit/_send_json) - kept in sync BY HAND, not derived
+    # automatically, so a change to what increments a live counter needs
+    # the same change made here, or historical and live numbers drift
+    # apart. Also note: a 429 increments BOTH rate_limited AND http_errors,
+    # same as live (_send_json increments http_errors_total for ANY
+    # status >= 400, including the 429 _check_rate_limit already sent).
+    counts = {}
+    if status == 200:
+        if method == "GET" and path == "/poll":
+            counts["polls_served"] = 1
+        elif method == "POST" and path == "/report":
+            counts["reports_received"] = 1
+        elif method == "POST" and path == "/command":
+            counts["commands_queued"] = 1
+        elif method == "GET" and path.startswith("/result/"):
+            counts["results_fetched"] = 1
+    if status == 429:
+        counts["rate_limited"] = 1
+    if status >= 400:
+        counts["http_errors"] = 1
+    return counts
+
+
+def _log_files_newest_first():
+    # bridge.log is always current; RotatingFileHandler names older ones
+    # bridge.log.1 (most recently rotated) through bridge.log.<backupCount>
+    # (oldest) - so this order is already newest-to-oldest.
+    paths = [LOG_PATH]
+    i = 1
+    while True:
+        candidate = f"{LOG_PATH}.{i}"
+        if not os.path.isfile(candidate):
+            break
+        paths.append(candidate)
+        i += 1
+    return paths
+
+
+def _iter_log_lines_reverse(path, chunk_size=65536):
+    # Yields raw lines newest-first without ever loading the whole file
+    # into memory - lets _metrics_history_buckets stop as soon as it has
+    # walked back past the requested window instead of always parsing an
+    # entire (up to 1MB, or up to backupCount of them for "week") log file
+    # start-to-finish on every request, which is what made short ranges
+    # (minute/15m/hour - only needing the tail) pay the same cost as week.
+    try:
+        f = open(path, "rb")
+    except OSError:
+        return
+    with f:
+        f.seek(0, os.SEEK_END)
+        pos = f.tell()
+        trailing = b""
+        while pos > 0:
+            read_size = min(chunk_size, pos)
+            pos -= read_size
+            f.seek(pos)
+            chunk = f.read(read_size)
+            data = chunk + trailing
+            parts = data.split(b"\n")
+            trailing = parts[0]  # possibly a partial line - prepend to next (earlier) chunk
+            for raw in reversed(parts[1:]):
+                if raw:
+                    yield raw.decode("utf-8", errors="replace")
+        if trailing:
+            yield trailing.decode("utf-8", errors="replace")
+
+
+def _parse_log_ts(ts_str):
+    # ts_str is always 'YYYY-MM-DD HH:MM:SS' (fixed width, from _LOG_LINE_RE) -
+    # slicing out the ints directly and handing mktime an already-built
+    # tuple skips strptime's generic format-string parsing (its regex and
+    # locale/month-name lookups), which is most of its cost. mktime itself
+    # still resolves DST correctly since it gets the real date+time, not an
+    # offset added after the fact.
+    return time.mktime((
+        int(ts_str[0:4]), int(ts_str[5:7]), int(ts_str[8:10]),
+        int(ts_str[11:13]), int(ts_str[14:16]), int(ts_str[17:19]),
+        0, 0, -1))
+
+
+def _metrics_history_buckets(range_key):
+    cfg = METRICS_HISTORY_RANGES.get(range_key)
+    if cfg is None:
+        return None
+    span_seconds, bucket_seconds = cfg
+    now = time.time()
+    num_buckets = span_seconds // bucket_seconds
+    # Bucket grid is anchored to absolute epoch time (multiples of
+    # bucket_seconds), not to `now` - this is what lets it line up exactly
+    # with state.history's ring-buffer indexing (idx = int(ts // bucket_seconds)),
+    # so live data can be dropped straight into the right slot with no
+    # rescaling. base_idx is the idx of buckets[0].
+    last_idx = int(now // bucket_seconds)
+    base_idx = last_idx - num_buckets + 1
+    start_ts = base_idx * bucket_seconds
+    buckets = [
+        {"ts": (base_idx + i) * bucket_seconds, **{f: 0 for f in METRICS_HISTORY_FIELDS}}
+        for i in range(num_buckets)
+    ]
+
+    # 1. Live in-memory ring buffer first - O(num_buckets), zero file I/O.
+    # Authoritative for anything since this process started: metric_inc()
+    # keeps every range's buffer updated in O(1) per event as it happens.
+    # Storage position for a given idx is idx % num_buckets (metric_inc's
+    # write-side formula) - NOT the same as this loop's output position i
+    # (i = idx - base_idx) unless base_idx happens to be a multiple of
+    # num_buckets, so the lookup must use the same modulo, not live_slots[i].
+    live_slots = state.history_snapshot(range_key)
+    for i in range(num_buckets):
+        expected_idx = base_idx + i
+        slot = live_slots[expected_idx % num_buckets]
+        if slot["idx"] == expected_idx:
+            counts = slot["counts"]
+            for f in METRICS_HISTORY_FIELDS:
+                buckets[i][f] = counts.get(f, 0)
+
+    # 2. Log fallback ONLY for the slice of the window older than
+    # START_TIME - live tracking can't have seen anything before this
+    # process existed. This shrinks toward nothing as uptime grows, and
+    # once the whole requested range postdates START_TIME (start_ts >=
+    # START_TIME) it's skipped entirely - no log I/O at all at that point,
+    # for any range including "week". Capped at START_TIME so it can never
+    # re-add events the live counters already counted.
+    reached_start = True
+    oldest_seen = now
+    if start_ts < START_TIME:
+        reached_start = False
+        oldest_seen = START_TIME
+        # Same log-line timestamp string repeats across many consecutive
+        # lines during a request burst (second-resolution timestamps) -
+        # memoizing avoids re-running _parse_log_ts for every repeat.
+        ts_cache = {}
+        for path in _log_files_newest_first():
+            for line in _iter_log_lines_reverse(path):
+                m = _LOG_LINE_RE.match(line)
+                if not m:
+                    continue
+                ts_str = m.group(1)
+                ts = ts_cache.get(ts_str)
+                if ts is None:
+                    try:
+                        ts = _parse_log_ts(ts_str)
+                    except ValueError:
+                        continue
+                    ts_cache[ts_str] = ts
+                if ts >= START_TIME:
+                    continue  # already counted live - keep walking backward for the pre-start gap
+                oldest_seen = min(oldest_seen, ts)
+                if ts < start_ts:
+                    # Reading newest-first, so everything else left in this
+                    # file (and any older rotated files) is even older -
+                    # nothing further can land inside the window.
+                    reached_start = True
+                    break
+                idx = int(ts // bucket_seconds) - base_idx
+                if idx < 0 or idx >= len(buckets):
+                    continue
+                for field, n in _categorize_log_line(m.group(2), m.group(3), int(m.group(4))).items():
+                    buckets[idx][field] += n
+            if reached_start:
+                break
+
+    # Once we've walked back past the window start (or live tracking
+    # already covers it in full), coverage is complete. Only when every
+    # available log line has been exhausted without ever reaching
+    # start_ts do we report the real (short) coverage.
+    coverage_seconds = span_seconds if reached_start else max(0.0, now - oldest_seen)
+
+    return {
+        "range": range_key,
+        "bucket_seconds": bucket_seconds,
+        "buckets": buckets,
+        "coverage_seconds": round(coverage_seconds, 1),
+    }
+
+
+# Multiple dashboard tabs/clients polling /metrics/history at once would
+# otherwise each trigger their own full log walk for the same range at
+# nearly the same moment. Also scales with bucket width: a "week" bucket
+# covers 2h, so recomputing it every 15s (the client's poll interval) buys
+# nothing but cost - no point re-walking the whole log more often than a
+# bucket's worth of new data could even shift a bar. Floor of 3s still
+# collapses near-simultaneous requests for the fine-grained ranges; cap of
+# 60s keeps even "week" reasonably fresh.
+def _metrics_history_cache_ttl(range_key):
+    cfg = METRICS_HISTORY_RANGES.get(range_key)
+    if cfg is None:
+        return 3
+    _, bucket_seconds = cfg
+    return max(3, min(60, bucket_seconds // 10))
+
+
+_metrics_history_cache_lock = threading.Lock()
+_metrics_history_cache = {}  # range_key -> (monotonic_time, result)
+
+
+def _metrics_history_buckets_cached(range_key):
+    now_mono = time.monotonic()
+    with _metrics_history_cache_lock:
+        cached = _metrics_history_cache.get(range_key)
+        if cached and now_mono - cached[0] < _metrics_history_cache_ttl(range_key):
+            return cached[1]
+    result = _metrics_history_buckets(range_key)
+    if result is not None:
+        with _metrics_history_cache_lock:
+            _metrics_history_cache[range_key] = (now_mono, result)
+    return result
 
 
 # Every request needs this header, regardless of FLEET_BRIDGE_KEY - a plain
@@ -214,6 +506,7 @@ CSRF_HEADER = "X-Fleet-Dashboard"
 BROWSER_TRIGGERED_PATHS = (
     "/command", "/apps", "/pcfiles/write", "/pcfiles/mkdir",
     "/pcfiles/delete", "/pcfiles/move", "/node_folder", "/admin/reload", "/admin/import",
+    "/admin/shell_pin", "/admin/delete_node", "/admin/spawn_sim_node",
 )
 
 MAX_BODY_BYTES = 2 * 1024 * 1024          # reject absurdly large request bodies outright
@@ -224,7 +517,27 @@ UNFETCHED_RESULT_TTL_SECONDS = 30 * 60    # a result nobody has read yet (e.g. d
                                            # being dropped, so a slow admin doesn't miss it
 MAX_RESULTS_STORED = 2000                 # hard cap regardless of age, in case of a burst
 RATE_LIMIT_WINDOW_SECONDS = 10
-RATE_LIMIT_MAX_REQUESTS = 100             # per source IP, per window - generous for normal polling
+# Per source IP, per window. 100 was sized for the old ~1.2s effective poll
+# cadence (a craftos_shim.lua timer-rounding bug silently floored every
+# sub-1s sleep to ~1s - see game/apps/common/fleetbridge.lua's
+# POLL_INTERVAL_ACTIVE comment). Fixed, real cadence is now ~0.3-0.4s/cycle
+# (poll+report = 2 requests), which is ~55-65 req/10s for a SINGLE node -
+# already close to 100 alone, and multiple nodes sharing one source IP (any
+# NAT'd fleet, or this project's own windows/sim/ multi-node local dev setup,
+# where every sim node shares 127.0.0.1) add up fast. 600 comfortably covers
+# a double-digit node count at the new cadence while still capping any one
+# source at 60 req/s, which is still well above what real fleet polling
+# needs. FLEET_RATE_LIMIT_MAX_REQUESTS overrides for deployments that want a
+# different number instead of a code change.
+try:
+    # Guarded the same way _PORT_FOR_LOG above is - this runs at import
+    # time, so a typo'd env var (stray whitespace from a batch script,
+    # "600rps", etc.) would otherwise crash the whole process before it can
+    # even log an error, instead of just falling back to the documented
+    # default.
+    RATE_LIMIT_MAX_REQUESTS = int(os.environ.get("FLEET_RATE_LIMIT_MAX_REQUESTS", "600"))
+except ValueError:
+    RATE_LIMIT_MAX_REQUESTS = 600
 
 INFLIGHT_REQUEUE_SECONDS = 20             # a command handed out by /poll but never acked by a
                                            # matching /report result (node crashed/lost network
@@ -266,7 +579,17 @@ try:
 except (IndexError, ValueError):
     _PORT_FOR_LOG = 8787
 _LOG_FILENAME = "bridge.log" if _PORT_FOR_LOG == 8787 else f"bridge-{_PORT_FOR_LOG}.log"
-LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), _LOG_FILENAME)
+# All logs (this file's own, per-node report output, sim-node console
+# capture) live under one windows/logs/ root, split into subdirectories by
+# kind - previously scattered flat across windows/ itself (bridge.log,
+# bridge_stdout.log), windows/logs/ (per-node .log, no further grouping),
+# and windows/sim/<id>/ (mixed in with that node's actual simulated
+# filesystem). LOGS_DIR is computed the same way LOG_PATH always was
+# (can't use SCRIPT_DIR - that's defined further down, and this whole
+# block has to run at import time, before SCRIPT_DIR exists yet).
+LOGS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+LOG_PATH = os.path.join(LOGS_DIR, "bridge", _LOG_FILENAME)
+os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
 logger = logging.getLogger("bridge")
 logger.setLevel(logging.INFO)
 # size-based rotation alone (still needed - protects against a burst
@@ -313,13 +636,6 @@ def _get_or_create_auto_key():
     return new_key
 
 
-GAME_DIR = os.path.join(SCRIPT_DIR, "..", "game")
-APPS_DIR = os.path.join(GAME_DIR, "apps")
-FLEETOS_PATH = os.path.join(GAME_DIR, "fleetos.lua")
-INSTALL_PATH = os.path.join(GAME_DIR, "install.lua")
-TRIANGULATION_PATH = os.path.join(GAME_DIR, "triangulation.lua")
-DASHBOARD_PATH = os.path.join(SCRIPT_DIR, "dashboard.html")
-COMPUTE_DIR = os.path.join(SCRIPT_DIR, "compute")
 COMPUTE_TIMEOUT_SECONDS = 5   # protects the bridge from a hung/runaway script;
                               # independent of whatever timeout the CALLER
                               # (e.g. raytower_master.lua) gives up waiting at
@@ -342,334 +658,371 @@ MAX_CONCURRENT_LONG_REQUESTS = 4
 _long_request_semaphore = threading.BoundedSemaphore(MAX_CONCURRENT_LONG_REQUESTS)
 
 
-def resolve_compute_script(name):
-    # .py takes priority (run via this same Python interpreter); .exe is the
-    # fallback for a compiled script (e.g. a future C++ port) - either way
-    # the caller gets the exact same /compute/<name> contract. Returns
-    # (path, is_python) or (None, None) if neither exists.
-    py_path = os.path.join(COMPUTE_DIR, name + ".py")
-    if os.path.isfile(py_path):
-        return py_path, True
-    exe_path = os.path.join(COMPUTE_DIR, name + ".exe")
-    if os.path.isfile(exe_path):
-        return exe_path, False
-    return None, None
-
-
-def list_compute_script_names():
-    # Leading underscore (e.g. _fleetos_world.py) marks a shared helper
-    # module meant to be imported by other compute scripts, not a runnable
-    # script itself - excluded from the dashboard's listing so it doesn't
-    # show up as something you'd "Run".
-    if not os.path.isdir(COMPUTE_DIR):
-        return []
-    return sorted(f[:-3] for f in os.listdir(COMPUTE_DIR) if f.endswith(".py") and not f.startswith("_"))
-
-
-def is_valid_compute_name(name):
-    return bool(name) and "/" not in name and name.replace("_", "").isalnum()
-
-
-# ---- PC-side file browsing (dashboard's Explorer, "This PC" source) ----
-# Two roots only - NOT the whole repo/disk - so this can't turn into a
-# general-purpose remote file browser for the machine bridge_server.py
-# happens to run on. "game" mirrors exactly what a real computer's
-# fs would look like (it's the master copy everything gets deployed
-# from/to); "compute" is where windows/compute/<name>.py|.exe live.
-PC_ROOTS = {"game": GAME_DIR, "compute": COMPUTE_DIR}
-
-
-def resolve_pc_path(root_key, rel_path):
-    # Returns an absolute path guaranteed to stay inside PC_ROOTS[root_key],
-    # or None if root_key is unknown or rel_path tries to escape it (via
-    # "..", an absolute path, or a different drive letter) - os.path.abspath
-    # + a prefix check catches all of those uniformly, which is more robust
-    # on Windows than a plain ".." substring check (mixed "/"/"\", "C:\\..").
-    root = PC_ROOTS.get(root_key)
-    if root is None:
-        return None
-    root_abs = os.path.abspath(root)
-    candidate = os.path.abspath(os.path.join(root_abs, rel_path or ""))
-    if candidate != root_abs and not candidate.startswith(root_abs + os.sep):
-        return None
-    return candidate
-
-
-def list_pc_entries(abs_dir):
-    entries = []
-    for name in os.listdir(abs_dir):
-        full = os.path.join(abs_dir, name)
-        is_dir = os.path.isdir(full)
-        entries.append({"name": name, "isDir": is_dir, "size": 0 if is_dir else os.path.getsize(full)})
-    entries.sort(key=lambda e: (not e["isDir"], e["name"].lower()))
-    return entries
-
-
-# Mirrors fleetos.lua's resolveAppPath: apps/<name>.lua flat first (for
-# anything dropped in directly), then each group folder - keeps this in
-# sync with game/apps/common|master|tower/ so the dashboard can find/edit
-# apps regardless of which group they're filed under.
-APP_GROUPS = ["common", "raytower"]
-
-
-def list_app_names():
-    names = set()
-    if os.path.isdir(APPS_DIR):
-        names.update(f[:-4] for f in os.listdir(APPS_DIR) if f.endswith(".lua"))
-        for group in APP_GROUPS:
-            group_dir = os.path.join(APPS_DIR, group)
-            if os.path.isdir(group_dir):
-                names.update(f[:-4] for f in os.listdir(group_dir) if f.endswith(".lua"))
-    return sorted(names)
-
-
-def list_apps_grouped():
-    # Mirrors fleetos.lua's listAvailableApps() grouping so the dashboard
-    # can show the same folder structure and offer it as a dropdown when
-    # creating a new app.
-    groups = []
-    if not os.path.isdir(APPS_DIR):
-        return groups
-    flat = sorted(f[:-4] for f in os.listdir(APPS_DIR) if f.endswith(".lua"))
-    for group in APP_GROUPS:
-        group_dir = os.path.join(APPS_DIR, group)
-        if os.path.isdir(group_dir):
-            names = sorted(f[:-4] for f in os.listdir(group_dir) if f.endswith(".lua"))
-            if names:
-                groups.append({"name": group, "apps": names})
-    if flat:
-        groups.append({"name": "other", "apps": flat})
-    return groups
-
-
-def resolve_app_path(filename):
-    flat = os.path.join(APPS_DIR, filename)
-    if os.path.isfile(flat):
-        return flat
-    for group in APP_GROUPS:
-        grouped = os.path.join(APPS_DIR, group, filename)
-        if os.path.isfile(grouped):
-            return grouped
-    return None
-
-
-lock = threading.Lock()
-next_id = 1
-results_by_id = {}   # command id (str) -> {"result": ..., "ts": float, "fetched": bool}, kept
-                      # around so slow pollers (e.g. readfile) don't miss a
-                      # result that only appeared in a single fleetbridge.lua
-                      # report cycle. Pruned by _prune_results() so a long-
-                      # running bridge doesn't grow this forever.
-
-# node id -> { "pending": [...], "inflight": {cmd_id_str: {"cmd":..., "ts":...}},
-#              "latest_report": {...}, "latest_report_time": float }
-# Nodes register themselves just by polling once - no separate "join" step.
-# "pending"/"inflight" are persisted (see _save_state) so a bridge restart
-# doesn't silently drop queued/in-flight commands; latest_report is runtime-only
-# and gets refreshed the moment the node polls/reports again.
-nodes = {}
-
-# Recent "*" (broadcast) commands, so a node that registers itself AFTER the
-# broadcast was sent still receives it - previously target=="*" only queued to
-# nodes already known at that instant. Entries: {"id":, "ts":, "cmd":}. Pruned
-# by age in _prune_results(). Seeded into a node's "pending" once, at the
-# moment that node is first seen (see get_node()).
-broadcast_log = []
-
-# source IP -> list of request timestamps within the current window, used by
-# _check_rate_limit(). Not meant to survive a restart or scale past one
-# process - this is a hobby-project throttle against accidental/malicious
-# request floods, not a production rate limiter.
-request_times_by_ip = {}
-
 STATE_PATH = os.path.join(SCRIPT_DIR, "bridge_state.json")
-
-# node id -> folder name (dashboard's "system of folders" for organizing a
-# fleet). Purely a dashboard-side label - fleetbridge.lua/the node itself
-# never needs to know what folder it's filed under, so this lives ONLY here,
-# persisted to disk (unlike `nodes` above, which is rebuilt from scratch
-# every time a node re-polls after a bridge restart).
 NODE_META_PATH = os.path.join(SCRIPT_DIR, "node_meta.json")
-node_folders = {}
+# bump this + add a migration branch in FleetState._load_node_folders if this file's shape ever changes
+NODE_META_VERSION = 2
+STATE_VERSION = 1  # bump this + add a migration branch in StateRepository.load if this file's shape ever changes
+# _save_state() used to run synchronously on every single /poll and /report
+# (i.e. every mutation, INCLUDING the two highest-frequency request types -
+# every node hits one or the other every poll cycle) - a full JSON re-dump
+# of results_by_id/broadcast_log/every node's pending+inflight, written to
+# disk, on every one of those. Harmless at the old ~1.2s effective poll
+# cadence; a real bottleneck now that the timer-rounding bug that caused
+# that cadence is fixed (see game/apps/common/fleetbridge.lua's
+# POLL_INTERVAL_ACTIVE comment) and a real cycle is ~0.3-0.4s - a fleet of
+# any size now means several full-state disk writes per second minimum.
+# StateRepository.mark_dirty() replaces the write with a flag; its flush
+# thread actually writes at most once per STATE_FLUSH_INTERVAL_SECONDS,
+# batching however many mutations happened in between into one write. Two
+# call sites deliberately still call StateRepository.save() directly
+# instead of mark_dirty(): the final shutdown save (state must be on disk
+# before the process actually exits) and /admin/reload (os.execv() replaces
+# this process immediately after - a debounced write would never get a
+# chance to run).
+STATE_FLUSH_INTERVAL_SECONDS = 2
 
 
-# bump this + add a migration branch in _load_node_folders below if this file's shape ever changes
-NODE_META_VERSION = 1
+def _hash_shell_pin(pin):
+    return hashlib.sha256(pin.encode("utf-8")).hexdigest()
 
 
-def _load_node_folders():
-    global node_folders
-    try:
-        with open(NODE_META_PATH, "r", encoding="utf-8") as f:
-            raw = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        node_folders = {}
-        return
-    # node_meta.json had no schema version at all before this - a future
-    # shape change would have no way to tell "old unversioned file" apart
-    # from "new file missing a field by mistake". A file with no "version"
-    # key is the original shape (a flat {node_id: folder_name} dict) -
-    # treated as version 1 with no transformation needed. When this shape
-    # actually changes, add `if raw.get("version") == 1: raw = {migrate...}`
-    # here rather than breaking older files outright.
-    if isinstance(raw, dict) and "version" in raw:
-        node_folders = raw.get("data", {})
-    else:
-        node_folders = raw if isinstance(raw, dict) else {}
+class FleetState:
+    """
+    Owns every piece of mutable, in-memory fleet data - nodes, command
+    results, the broadcast log, the next command id, sim-node subprocess
+    handles, rate-limit buckets, dashboard folder assignments, shell PINs,
+    and the operational counters - plus the single `lock` guarding all of
+    it, instead of each being its own bare module-level global mutated
+    directly by every Handler method. Previously "what state does this
+    bridge actually hold" was only discoverable by reading every route by
+    hand; it's now this class's __init__. Also fixes a real sharp edge:
+    `global next_id; next_id += 1`-style reassignment only ever works on a
+    MODULE-level name, which is exactly why persistence used to be awkward
+    to factor out cleanly (see StateRepository below) - an attribute
+    (`self.next_id += 1`) doesn't have that restriction.
+    """
 
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.next_id = 1
+        # command id (str) -> {"result": ..., "ts": float, "fetched": bool},
+        # kept around so slow pollers (e.g. readfile) don't miss a result
+        # that only appeared in a single fleetbridge.lua report cycle.
+        # Pruned by prune_results() so a long-running bridge doesn't grow
+        # this forever.
+        self.results_by_id = {}
+        # node id -> { "pending": [...], "inflight": {cmd_id_str: {"cmd":..., "ts":...}},
+        #              "latest_report": {...}, "latest_report_time": float }
+        # Nodes register themselves just by polling once - no separate
+        # "join" step. "pending"/"inflight" are persisted (see
+        # StateRepository) so a bridge restart doesn't silently drop
+        # queued/in-flight commands; latest_report is runtime-only and gets
+        # refreshed the moment the node polls/reports again.
+        self.nodes = {}
+        # Recent "*" (broadcast) commands, so a node that registers itself
+        # AFTER the broadcast was sent still receives it - previously
+        # target=="*" only queued to nodes already known at that instant.
+        # Entries: {"id":, "ts":, "cmd":}. Pruned by age in prune_results().
+        # Seeded into a node's "pending" once, at the moment that node is
+        # first seen (see get_node()).
+        self.broadcast_log = []
+        # node id -> subprocess.Popen for a sim node started via
+        # /admin/spawn_sim_node, kept only so a second spawn for the same id
+        # while one's already running can be refused with a clear error
+        # instead of two processes racing to write the same
+        # bridge_override.txt/log file. Not persisted - a bridge restart
+        # just loses track of already-running sim processes (they keep
+        # running; re-spawning the same id after a bridge restart works
+        # fine, it just won't detect the still-alive old one).
+        self.sim_processes = {}
+        # source IP -> list of request timestamps within the current
+        # window, used by Handler._check_rate_limit(). Not meant to survive
+        # a restart or scale past one process - this is a hobby-project
+        # throttle against accidental/malicious request floods, not a
+        # production rate limiter.
+        self.request_times_by_ip = {}
+        # node id -> folder name (dashboard's "system of folders" for
+        # organizing a fleet). Purely a dashboard-side label -
+        # fleetbridge.lua/the node itself never needs to know what folder
+        # it's filed under, so this lives ONLY here, persisted to
+        # node_meta.json (unlike `nodes` above, which is rebuilt from
+        # scratch every time a node re-polls after a bridge restart).
+        self.node_folders = {}
+        # node id -> sha256 hex hash of a PIN apps/common/shell.lua
+        # requires before accepting a local `bridge <url> [key]` command on
+        # that node - see /shell_pin_check. Opt-in: a node with no entry
+        # here has no PIN requirement at all (the default). Hashed rather
+        # than stored as plaintext since node_meta.json is a plain file on
+        # disk - cheap extra step, no reason not to.
+        self.node_shell_pins = {}
+        self.metrics = {
+            "commands_queued_total": 0,
+            "reports_received_total": 0,
+            "polls_served_total": 0,
+            "results_fetched_total": 0,
+            "rate_limited_total": 0,
+            "http_errors_total": 0,
+        }
+        # Per-range ring buffers, updated live by metric_inc() below so
+        # GET /metrics/history can serve recent windows straight from
+        # memory instead of re-parsing bridge.log on every request (see
+        # _metrics_history_buckets, which only falls back to the log for
+        # the portion of a requested window that predates START_TIME -
+        # i.e. before this buffer existed). Not persisted: a restart just
+        # empties it, and the log fallback covers the gap until it refills.
+        # Each slot is {"idx": bucket_index or None, "counts": {...}};
+        # "idx" lets a stale slot (last written on a previous wrap of the
+        # ring, or never written) be told apart from a genuinely-zero
+        # current bucket without needing to zero out the whole array on
+        # every rollover.
+        self.history = {
+            range_key: [
+                {"idx": None, "counts": dict.fromkeys(METRICS_HISTORY_FIELDS, 0)}
+                for _ in range(span_seconds // bucket_seconds)
+            ]
+            for range_key, (span_seconds, bucket_seconds) in METRICS_HISTORY_RANGES.items()
+        }
+        self._load_node_folders()
 
-def _save_node_folders():
-    # Called with `lock` already held. Best-effort - a failed write here
-    # shouldn't take down the request that triggered it.
-    try:
-        with open(NODE_META_PATH, "w", encoding="utf-8") as f:
-            json.dump({"version": NODE_META_VERSION, "data": node_folders}, f)
-    except OSError as e:
-        logger.error(f"[bridge] failed to save {NODE_META_PATH}: {e}")
+    def metric_inc(self, name, n=1):
+        with self.lock:
+            self.metrics[name] = self.metrics.get(name, 0) + n
+            if not name.endswith("_total"):
+                return
+            field = name[:-len("_total")]
+            if field not in METRICS_HISTORY_FIELDS:
+                return
+            now = time.time()
+            for range_key, (_, bucket_seconds) in METRICS_HISTORY_RANGES.items():
+                slots = self.history[range_key]
+                idx = int(now // bucket_seconds)
+                slot = slots[idx % len(slots)]
+                if slot["idx"] != idx:
+                    slot["idx"] = idx
+                    slot["counts"] = dict.fromkeys(METRICS_HISTORY_FIELDS, 0)
+                slot["counts"][field] += n
 
+    def history_snapshot(self, range_key):
+        with self.lock:
+            return [{"idx": s["idx"], "counts": dict(s["counts"])} for s in self.history[range_key]]
 
-_load_node_folders()
+    def allocate_command_id(self):
+        # Called with `lock` already held by the caller (every call site
+        # already holds it for the rest of the mutation anyway) - a plain
+        # attribute bump, not its own lock acquisition, so a caller never
+        # has to release and re-acquire `lock` just to get an id.
+        cmd_id = self.next_id
+        self.next_id += 1
+        return cmd_id
 
+    def get_node(self, node_id):
+        node = self.nodes.get(node_id)
+        if node is None:
+            node = {"pending": [], "inflight": {}, "latest_report": None, "latest_report_time": None}
+            # Seed with any still-fresh "*" broadcasts sent before this node
+            # ever registered - otherwise a command sent to "*" before a
+            # node's first /poll would simply never reach it (the
+            # historical bug).
+            now = time.time()
+            for entry in self.broadcast_log:
+                if now - entry["ts"] <= BROADCAST_LOG_TTL_SECONDS:
+                    node["pending"].append(entry["cmd"])
+            self.nodes[node_id] = node
+        return node
 
-def get_node(node_id):
-    node = nodes.get(node_id)
-    if node is None:
-        node = {"pending": [], "inflight": {}, "latest_report": None, "latest_report_time": None}
-        # Seed with any still-fresh "*" broadcasts sent before this node ever
-        # registered - otherwise a command sent to "*" before a node's first
-        # /poll would simply never reach it (the historical bug).
+    def sweep_inflight(self):
+        # Called with `lock` already held. A command /poll handed to a node
+        # is moved to that node's "inflight" map, stamped with the time it
+        # was handed out. If the matching /report result never arrives
+        # (node crashed, lost network, or was killed mid-command) within
+        # INFLIGHT_REQUEUE_SECONDS, put it back in "pending" so the next
+        # poll gets another shot at it - previously a command vanished for
+        # good the instant /poll returned it, regardless of whether it was
+        # ever actually executed.
         now = time.time()
-        for entry in broadcast_log:
-            if now - entry["ts"] <= BROADCAST_LOG_TTL_SECONDS:
-                node["pending"].append(entry["cmd"])
-        nodes[node_id] = node
-    return node
+        for node in self.nodes.values():
+            inflight = node.get("inflight")
+            if not inflight:
+                continue
+            stale = [cid for cid, entry in inflight.items() if now - entry["ts"] > INFLIGHT_REQUEUE_SECONDS]
+            for cid in stale:
+                node["pending"].append(inflight.pop(cid)["cmd"])
+
+    def prune_results(self):
+        # Called with `lock` already held. Drops anything past its TTL,
+        # then - if still over the hard cap (e.g. a burst of commands all
+        # at once) - drops the oldest entries until back under it. A
+        # result nobody has fetched yet (dashboard was closed, admin
+        # stepped away) gets a much longer grace period than one that's
+        # already been seen.
+        now = time.time()
+        expired = [
+            cid for cid, entry in self.results_by_id.items()
+            if now - entry["ts"] > (RESULT_TTL_SECONDS if entry.get("fetched") else UNFETCHED_RESULT_TTL_SECONDS)
+        ]
+        for cid in expired:
+            del self.results_by_id[cid]
+        if len(self.results_by_id) > MAX_RESULTS_STORED:
+            oldest_first = sorted(self.results_by_id.items(), key=lambda kv: kv[1]["ts"])
+            for cid, _ in oldest_first[: len(self.results_by_id) - MAX_RESULTS_STORED]:
+                del self.results_by_id[cid]
+        # Keeps only non-expired entries directly, rather than relying on
+        # broadcast_log being sorted ascending by ts (true under normal
+        # append-only operation, but NOT guaranteed after /admin/import
+        # wholesale-replaces this list with an imported bundle's own
+        # ordering) - a `del broadcast_log[:N]` form would delete N items
+        # from the front regardless of whether those were actually the
+        # stale ones.
+        self.broadcast_log[:] = [e for e in self.broadcast_log if now - e["ts"] <= BROADCAST_LOG_TTL_SECONDS]
+        self.sweep_inflight()
+
+    def _load_node_folders(self):
+        try:
+            with open(NODE_META_PATH, "r", encoding="utf-8") as f:
+                raw = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            self.node_folders = {}
+            self.node_shell_pins = {}
+            return
+        # node_meta.json had no schema version at all before this - a
+        # future shape change would have no way to tell "old unversioned
+        # file" apart from "new file missing a field by mistake". A file
+        # with no "version" key is the original shape (a flat
+        # {node_id: folder_name} dict) - treated as version 1 with no
+        # transformation needed. Version 2 added "shell_pins" alongside
+        # "data" - a version-1 file simply has no such key, which .get()
+        # below already treats as "no PINs set" with no explicit migration
+        # branch needed.
+        if isinstance(raw, dict) and "version" in raw:
+            self.node_folders = raw.get("data", {})
+            self.node_shell_pins = raw.get("shell_pins", {})
+        else:
+            self.node_folders = raw if isinstance(raw, dict) else {}
+            self.node_shell_pins = {}
+        if not isinstance(self.node_folders, dict):
+            self.node_folders = {}
+        if not isinstance(self.node_shell_pins, dict):
+            self.node_shell_pins = {}
+
+    def save_node_folders(self):
+        # Called with `lock` already held. Best-effort - a failed write
+        # here shouldn't take down the request that triggered it.
+        try:
+            with open(NODE_META_PATH, "w", encoding="utf-8") as f:
+                json.dump(
+                    {"version": NODE_META_VERSION, "data": self.node_folders, "shell_pins": self.node_shell_pins}, f)
+        except OSError as e:
+            logger.error(f"[bridge] failed to save {NODE_META_PATH}: {e}")
 
 
-def _sweep_inflight():
-    # Called with `lock` already held. A command /poll handed to a node is
-    # moved to that node's "inflight" map, stamped with the time it was handed
-    # out. If the matching /report result never arrives (node crashed, lost
-    # network, or was killed mid-command) within INFLIGHT_REQUEUE_SECONDS,
-    # put it back in "pending" so the next poll gets another shot at it -
-    # previously a command vanished for good the instant /poll returned it,
-    # regardless of whether it was ever actually executed.
-    now = time.time()
-    for node in nodes.values():
-        inflight = node.get("inflight")
-        if not inflight:
-            continue
-        stale = [cid for cid, entry in inflight.items() if now - entry["ts"] > INFLIGHT_REQUEUE_SECONDS]
-        for cid in stale:
-            node["pending"].append(inflight.pop(cid)["cmd"])
+class StateRepository:
+    """
+    Persistence for FleetState's hot-path fields (pending/inflight per
+    node, results_by_id, broadcast_log, next_id) to STATE_PATH - separate
+    from FleetState itself so "what the in-memory state IS" and "how/when
+    it gets written to disk" are independent concerns. node_folders/
+    node_shell_pins are NOT handled here - see FleetState.save_node_folders/
+    _load_node_folders - they're a separate file (node_meta.json) with much
+    lower write frequency (admin actions only), saved synchronously and
+    directly rather than through this debounced flow.
+    """
+
+    def __init__(self, state_path, flush_interval_seconds):
+        self.state_path = state_path
+        self.flush_interval_seconds = flush_interval_seconds
+        self.dirty = False
+
+    def save(self, state):
+        # Called with state.lock already held.
+        try:
+            snapshot = {
+                "version": STATE_VERSION,
+                "next_id": state.next_id,
+                "results_by_id": state.results_by_id,
+                "broadcast_log": state.broadcast_log,
+                "nodes": {
+                    node_id: {"pending": node["pending"], "inflight": node["inflight"]}
+                    for node_id, node in state.nodes.items()
+                },
+            }
+            tmp_path = self.state_path + ".tmp"
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(snapshot, f)
+            os.replace(tmp_path, self.state_path)
+        except OSError as e:
+            logger.error(f"[bridge] failed to save {self.state_path}: {e}")
+
+    def load(self, state):
+        try:
+            with open(self.state_path, "r", encoding="utf-8") as f:
+                snapshot = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return
+        # version 1 is the only shape that has ever existed - a file with
+        # no "version" key (or an unrecognized one) is loaded best-effort
+        # via the same .get()-with-defaults below rather than refused
+        # outright, but logs a warning so a real future incompatibility
+        # doesn't fail silently.
+        version = snapshot.get("version")
+        if version not in (None, STATE_VERSION):
+            logger.warning(f"[bridge] {self.state_path} has unrecognized version {version!r} - loading best-effort")
+        state.next_id = snapshot.get("next_id", state.next_id)
+        state.results_by_id = snapshot.get("results_by_id", {})
+        state.broadcast_log = snapshot.get("broadcast_log", [])
+        for node_id, saved in snapshot.get("nodes", {}).items():
+            state.nodes[node_id] = {
+                "pending": saved.get("pending", []),
+                "inflight": saved.get("inflight", {}),
+                "latest_report": None,
+                "latest_report_time": None,
+            }
+        logger.info(f"[bridge] restored state from {self.state_path}: "
+                    f"{len(state.nodes)} node(s), {len(state.results_by_id)} result(s)")
+
+    def mark_dirty(self):
+        self.dirty = True
+
+    def start_flush_thread(self, state):
+        def _flush_loop():
+            while True:
+                time.sleep(self.flush_interval_seconds)
+                with state.lock:
+                    if not self.dirty:
+                        continue
+                    self.dirty = False
+                    self.save(state)
+        # daemon=True: this thread never blocks process exit - the
+        # shutdown path in main()'s `finally` block does its own
+        # synchronous final save(), this loop just doesn't need to be
+        # joined/stopped first.
+        threading.Thread(target=_flush_loop, daemon=True).start()
 
 
-def _prune_results():
-    # Called with `lock` already held. Drops anything past its TTL, then -
-    # if still over the hard cap (e.g. a burst of commands all at once) -
-    # drops the oldest entries until back under it. A result nobody has
-    # fetched yet (dashboard was closed, admin stepped away) gets a much
-    # longer grace period than one that's already been seen.
-    now = time.time()
-    expired = [
-        cid for cid, entry in results_by_id.items()
-        if now - entry["ts"] > (RESULT_TTL_SECONDS if entry.get("fetched") else UNFETCHED_RESULT_TTL_SECONDS)
-    ]
-    for cid in expired:
-        del results_by_id[cid]
-    if len(results_by_id) > MAX_RESULTS_STORED:
-        oldest_first = sorted(results_by_id.items(), key=lambda kv: kv[1]["ts"])
-        for cid, _ in oldest_first[: len(results_by_id) - MAX_RESULTS_STORED]:
-            del results_by_id[cid]
-    # Keeps only non-expired entries directly, rather than relying on
-    # broadcast_log being sorted ascending by ts (true under normal
-    # append-only operation, but NOT guaranteed after /admin/import
-    # wholesale-replaces this list with an imported bundle's own ordering)
-    # - the previous `del broadcast_log[:N]` form deleted N items from the
-    # front regardless of whether those were actually the stale ones.
-    broadcast_log[:] = [e for e in broadcast_log if now - e["ts"] <= BROADCAST_LOG_TTL_SECONDS]
-    _sweep_inflight()
-
-
-STATE_VERSION = 1  # bump this + add a migration branch in _load_state below if this file's shape ever changes
-
-
-def _save_state():
-    # Called with `lock` already held. Best-effort, like _save_node_folders -
-    # persists exactly what a restart would otherwise lose: queued/in-flight
-    # commands per node, command results, and the broadcast log. Runtime-
-    # only fields (latest_report, latest_report_time) are NOT persisted - a
-    # node refreshes those itself within one poll/report cycle after restart.
-    try:
-        snapshot = {
-            "version": STATE_VERSION,
-            "next_id": next_id,
-            "results_by_id": results_by_id,
-            "broadcast_log": broadcast_log,
-            "nodes": {
-                node_id: {"pending": node["pending"], "inflight": node["inflight"]}
-                for node_id, node in nodes.items()
-            },
-        }
-        tmp_path = STATE_PATH + ".tmp"
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(snapshot, f)
-        os.replace(tmp_path, STATE_PATH)
-    except OSError as e:
-        logger.error(f"[bridge] failed to save {STATE_PATH}: {e}")
-
-
-def _load_state():
-    global next_id, results_by_id, broadcast_log
-    try:
-        with open(STATE_PATH, "r", encoding="utf-8") as f:
-            snapshot = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return
-    # version 1 is the only shape that has ever existed - a file with no
-    # "version" key (or an unrecognized one) is loaded best-effort via the
-    # same .get()-with-defaults below rather than refused outright, but logs
-    # a warning so a real future incompatibility doesn't fail silently.
-    version = snapshot.get("version")
-    if version not in (None, STATE_VERSION):
-        logger.warning(f"[bridge] {STATE_PATH} has unrecognized version {version!r} - loading best-effort")
-    next_id = snapshot.get("next_id", next_id)
-    results_by_id = snapshot.get("results_by_id", {})
-    broadcast_log = snapshot.get("broadcast_log", [])
-    for node_id, saved in snapshot.get("nodes", {}).items():
-        nodes[node_id] = {
-            "pending": saved.get("pending", []),
-            "inflight": saved.get("inflight", {}),
-            "latest_report": None,
-            "latest_report_time": None,
-        }
-    logger.info(f"[bridge] restored state from {STATE_PATH}: "
-                f"{len(nodes)} node(s), {len(results_by_id)} result(s)")
-
-
-_load_state()
+state = FleetState()
+state_repo = StateRepository(STATE_PATH, STATE_FLUSH_INTERVAL_SECONDS)
+state_repo.load(state)
+state_repo.start_flush_thread(state)
 
 # centralized log collection. Previously every node's output only ever
 # lived in its own in-memory buffer (fleetos.getOutput(), capped and only
 # viewable one node at a time through the dashboard's Terminal panel) - once
 # a node rebooted or the bridge restarted, it was gone, and diagnosing
 # something across several nodes meant switching the dashboard's Terminal
-# between them one at a time. Every /report's `output` (each node's last ~150
-# lines) is appended here to windows/logs/<node>.log, deduplicated against
-# the last line already written so re-sending the same rolling buffer every
-# report doesn't multiply it - a real terminal log an admin can grep/tail
-# across the whole fleet, that survives node reboots and bridge restarts.
-NODE_LOGS_DIR = os.path.join(SCRIPT_DIR, "logs")
+# between them one at a time. Every /report's new `output` lines (see the
+# /report handler's outputCursor-gated merge, protocolVersion >= 2 - a node
+# only ever reports lines it hasn't successfully delivered before, already
+# deduplicated at the source) are appended here to windows/logs/nodes/<node>.log -
+# a real terminal log an admin can grep/tail across the whole fleet, that
+# survives node reboots and bridge restarts.
+NODE_LOGS_DIR = os.path.join(LOGS_DIR, "nodes")
 _node_loggers = {}
-_node_last_logged_line = {}
 # Separate from the main `lock` (which guards fleet state like `nodes`) so
 # this doesn't hold up unrelated request handling during file I/O. Needed
 # because ThreadingHTTPServer runs every request on its own thread, and two
 # concurrent /report calls for the SAME node (e.g. a retried CC:Tweaked
 # http.post) could otherwise both see no logger yet and each construct their
-# own RotatingFileHandler pointed at the same file, or both compute
-# overlapping "new" lines from a stale read of _node_last_logged_line and
-# double-log/desync the dedup this function's docstring promises.
+# own RotatingFileHandler pointed at the same file.
 # RLock (not Lock) since _log_node_output holds it while calling
 # _get_node_logger, which also acquires it - same thread re-entering is
 # fine with RLock, would deadlock with a plain Lock.
@@ -698,26 +1051,68 @@ def _get_node_logger(node_id):
         return node_logger
 
 
-def _log_node_output(node_id, output_lines):
-    if not output_lines:
+def _log_node_output(node_id, new_lines):
+    # Called only with lines the /report handler's outputCursor check has
+    # already confirmed are genuinely new (not a retry-duplicated resend) -
+    # no dedup needed here, just write them.
+    if not new_lines:
         return
     with _node_log_lock:
-        last_seen = _node_last_logged_line.get(node_id)
-        start = 0
-        if last_seen is not None:
-            try:
-                # search from the end - the line we're looking for is usually
-                # near the tail, and an identical earlier duplicate line
-                # shouldn't make us re-log everything after ITS first occurrence
-                start = len(output_lines) - 1 - output_lines[::-1].index(last_seen) + 1
-            except ValueError:
-                start = 0  # our last position rolled off the buffer entirely - best effort, log what's left
-        new_lines = output_lines[start:]
-        if new_lines:
-            node_logger = _get_node_logger(node_id)
-            for line in new_lines:
-                node_logger.info(line)
-        _node_last_logged_line[node_id] = output_lines[-1]
+        node_logger = _get_node_logger(node_id)
+        for line in new_lines:
+            node_logger.info(line)
+
+
+def _merge_report(node, node_id, body):
+    # Called with `lock` already held, mutates `node` in place. Extracted
+    # out of the /report handler so it's directly unit-testable (see
+    # test_bridge_server.py) without spinning up a real HTTP server, same
+    # reasoning as _prune_results/_sweep_inflight above.
+    #
+    # protocolVersion >= 2 (see fleetbridge.lua's own comment on that
+    # constant) omits apps/appVersions/pos/effectiveConfig/monitor entirely
+    # when unchanged since the node's last successfully-delivered report,
+    # instead of resending them in full every cycle - merge over the
+    # previous report rather than replacing it outright, so an omitted key
+    # keeps whatever value it already had. `output`/`outputTail`/
+    # `outputCursor` are handled separately below, not through this generic
+    # merge - see their own comments.
+    merged = dict(node["latest_report"] or {})
+    for key, value in body.items():
+        if key not in ("output", "outputTail", "outputCursor"):
+            merged[key] = value
+
+    # `output` (if present at all) is a DELTA of newly-completed lines, not
+    # the resent last-150-lines window protocolVersion 1 sent - append
+    # rather than replace. Gated on `outputCursor` strictly advancing past
+    # what's already been recorded so an at-least-once HTTP retry (the node
+    # got no response, resent the exact same delta) can't double-append/
+    # double-log it - this is what apps/common/fleetbridge.lua's
+    # getOutputSince cursor exists for.
+    new_lines = body.get("output")
+    cursor = body.get("outputCursor")
+    stored_lines = node.get("_output_lines", [])
+    if isinstance(new_lines, list) and isinstance(cursor, (int, float)) \
+            and cursor > node.get("_output_seq", 0):
+        stored_lines = (stored_lines + new_lines)[-MAX_OUTPUT_LINES_STORED:]
+        node["_output_lines"] = stored_lines
+        node["_output_seq"] = cursor
+        _log_node_output(node_id, new_lines)
+    # The in-progress (not yet newline-terminated) line, e.g. a live
+    # "shell> " prompt - always just the latest value, no cursor needed
+    # (overwriting the same value twice is harmless, unlike double-
+    # appending a list would be).
+    tail = body.get("outputTail")
+    if tail is not None:
+        node["_output_tail"] = tail
+    # Reconstructed flat array, same shape/contract every existing consumer
+    # (dashboard.html's renderTerminal, etc.) already expects from
+    # `latest_report.output` - runtime-only like latest_report itself, not
+    # persisted by _save_state().
+    merged["output"] = stored_lines + ([node["_output_tail"]] if node.get("_output_tail") else [])
+
+    node["latest_report"] = merged
+    node["latest_report_time"] = time.time()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -726,14 +1121,17 @@ class Handler(BaseHTTPRequestHandler):
 
     def _cors_headers(self):
         # Lets the dashboard be hosted elsewhere (e.g. GitHub Pages) while
-        # still talking to this bridge on your own PC. No credentials are
-        # used, so a wildcard origin doesn't widen who can reach this
-        # server - that's still governed entirely by what host/port this
-        # process binds to (see FLEET_BRIDGE_HOST in main()) and whether
-        # FLEET_BRIDGE_KEY is set. The CSRF_HEADER requirement on
-        # state-changing routes (see _check_csrf) is what actually stops a
-        # random cross-origin page from firing commands - CORS here only
-        # controls whether cross-origin JS can READ the response.
+        # still talking to this bridge on your own PC. A wildcard origin
+        # here means CORS itself provides no protection against a random
+        # cross-origin page firing state-changing requests - see
+        # _check_csrf's own comment for why CSRF_HEADER doesn't fully cover
+        # that gap either. What actually stops it: FLEET_BRIDGE_KEY. Any
+        # bind beyond 127.0.0.1 requires one (see main()), and a
+        # cross-origin page has no way to read it out of the legitimate
+        # dashboard's localStorage. If you're relying on the localhost-only,
+        # no-key default instead, that default's safety comes from nothing
+        # else being able to REACH this server at all (bound to 127.0.0.1),
+        # not from anything in this CORS/CSRF layer.
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, X-API-Key, " + CSRF_HEADER)
@@ -767,13 +1165,34 @@ class Handler(BaseHTTPRequestHandler):
 
     def _check_csrf(self):
         # Required on every state-changing route regardless of FLEET_BRIDGE_KEY
-        # (see CSRF_HEADER above). A browser can only have set this header if
-        # dashboard.html's own JS built the request - a cross-site page can't
-        # add it without a CORS preflight, and our preflight doesn't check
-        # Origin, so it can't blindly probe its way past this. Doesn't
-        # protect against a non-browser client (curl, fleetctl.py) - those
-        # were never the threat model here, they already require you to
-        # have chosen to run them.
+        # (see CSRF_HEADER above).
+        #
+        # HONEST SCOPE NOTE: this header is NOT a secret and does NOT stop a
+        # determined attacker's own JavaScript. _cors_headers() explicitly
+        # allows CSRF_HEADER in Access-Control-Allow-Headers with a wildcard
+        # Origin, so a malicious page's own fetch() CAN pass the CORS
+        # preflight and set this header - "our preflight doesn't check
+        # Origin" makes this MORE permissive, not less. All this actually
+        # stops is a "dumb" CSRF vector that can't set custom headers at all
+        # (a plain <form> POST, an <img>/<script> GET) - it does nothing
+        # against a page that specifically knows to add this one header,
+        # which is trivial to find by reading this file (public source).
+        #
+        # When FLEET_BRIDGE_KEY is set (mandatory for any non-127.0.0.1
+        # bind - see main()), _check_auth's X-API-Key check already ran
+        # before this and is the REAL defense: a cross-origin page cannot
+        # read the key out of the legitimate dashboard's localStorage
+        # (Same-Origin Policy), so it cannot forge a valid request
+        # regardless of what this check does. This header only matters on
+        # its own when no key is configured at all (127.0.0.1-only,
+        # no-auth-needed default) - in that mode it's real but weak
+        # protection against a malicious website the browser also happens
+        # to have open, not a meaningful barrier against one that's
+        # specifically targeting this bridge.
+        #
+        # Doesn't protect against a non-browser client (curl, fleetctl.py)
+        # either way - those were never the threat model here, they
+        # already require you to have chosen to run them.
         if self.headers.get(CSRF_HEADER):
             return True
         self._send_json({"error": "missing " + CSRF_HEADER + " header"}, status=403)
@@ -782,24 +1201,26 @@ class Handler(BaseHTTPRequestHandler):
     def _check_rate_limit(self):
         ip = self.client_address[0]
         now = time.time()
-        with lock:
-            times = [t for t in request_times_by_ip.get(ip, []) if now - t < RATE_LIMIT_WINDOW_SECONDS]
+        with state.lock:
+            times = [t for t in state.request_times_by_ip.get(ip, []) if now - t < RATE_LIMIT_WINDOW_SECONDS]
             times.append(now)
-            request_times_by_ip[ip] = times
+            state.request_times_by_ip[ip] = times
             count = len(times)
         if count > RATE_LIMIT_MAX_REQUESTS:
-            _metric_inc("rate_limited_total")
+            state.metric_inc("rate_limited_total")
             self._send_json({"error": "rate limit exceeded, slow down"}, status=429)
             return False
         return True
 
-    def _send_json(self, obj, status=200):
+    def _send_json(self, obj, status=200, extra_headers=None):
         if status >= 400:
-            _metric_inc("http_errors_total")
+            state.metric_inc("http_errors_total")
         body = json.dumps(obj).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
+        for name, value in (extra_headers or {}).items():
+            self.send_header(name, value)
         self._cors_headers()
         self.end_headers()
         self.wfile.write(body)
@@ -882,14 +1303,14 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _serve_cacheable_file(self, path, not_found_label):
-        # Shared by every plain "read this Lua source file off disk and
-        # send it, ETag-cacheable" GET route (fleetos.lua, install.lua,
-        # triangulation.lua) - previously each was its own copy-pasted
-        # try/except FileNotFoundError block.
+    def _serve_cacheable_file(self, path, not_found_label, content_type="text/plain; charset=utf-8"):
+        # Shared by every plain "read this file off disk and send it,
+        # ETag-cacheable" GET route (fleetos.lua, install.lua,
+        # triangulation.lua, docs/*.html) - previously each was its own
+        # copy-pasted try/except FileNotFoundError block.
         try:
             with open(path, "r", encoding="utf-8") as f:
-                self._send_text_cacheable(f.read())
+                self._send_text_cacheable(f.read(), content_type=content_type)
         except FileNotFoundError:
             self._send_text(not_found_label + " not found", status=404)
 
@@ -906,11 +1327,14 @@ class Handler(BaseHTTPRequestHandler):
         # (fetched via CraftOS's built-in `wget`, which can't send custom
         # headers at all - everything install.lua fetches AFTER that via its
         # own http.get DOES carry the key, once you pass one to
-        # `install <bridge-url> <api-key>`), and /health (a healthcheck
+        # `install <bridge-url> <api-key>`), /health (a healthcheck
         # probe that had to know an API key first wouldn't be usable by most
         # monitoring/orchestration tooling, and it reveals nothing sensitive -
-        # just a node count and an uptime number).
+        # just a node count and an uptime number), and /docs/* (static help
+        # pages checked into the repo - same trust level as the dashboard
+        # shell itself, no fleet data in them).
         if self.path not in ("/", "/dashboard", "/install.lua", "/health") \
+                and not self.path.startswith("/docs/") \
                 and not self._check_auth(require_full=(self.path == "/admin/export")):
             return
 
@@ -932,6 +1356,32 @@ class Handler(BaseHTTPRequestHandler):
             # top-level file (not one of apps/*) - served separately so
             # the dashboard can push it alongside a raytower_master deploy.
             self._serve_cacheable_file(TRIANGULATION_PATH, "triangulation.lua")
+
+        elif self.path.startswith("/docs/") and self.path.endswith(".html"):
+            # lets the dashboard link straight to docs/*.html (e.g. the
+            # hardening guide) instead of telling users to go dig through
+            # the repo on disk.
+            #
+            # Bug fix: a plain "/", "\\", ".." substring blacklist on `name`
+            # looked like it blocked traversal, but doesn't catch a bare
+            # Windows drive-letter prefix like "C:evil.html" - on Windows,
+            # os.path.join(DOCS_DIR, "C:evil.html") DISCARDS DOCS_DIR
+            # entirely (a differently-drive-lettered component wins
+            # outright in ntpath join semantics), resolving to "C:evil.html"
+            # relative to that drive's own current directory - completely
+            # outside docs/. Confirmed exploitable: os.path.abspath() of
+            # that join lands on a totally different drive than DOCS_DIR.
+            # Fixed the same way resolve_pc_path() already does it
+            # (abspath + prefix check) instead of trying to extend the
+            # blacklist with yet another special case.
+            name = self.path[len("/docs/"):]
+            docs_abs = os.path.abspath(DOCS_DIR)
+            candidate = os.path.abspath(os.path.join(docs_abs, name))
+            if not candidate.startswith(docs_abs + os.sep):
+                self._send_text("invalid doc name", status=400)
+                return
+            self._serve_cacheable_file(
+                candidate, name, content_type="text/html; charset=utf-8")
 
         elif self.path == "/apps":
             self._send_json({"groups": list_apps_grouped(), "names": list_app_names()})
@@ -999,15 +1449,26 @@ class Handler(BaseHTTPRequestHandler):
             if not node_id:
                 self._send_json({"error": "poll needs ?node=<id>"}, status=400)
                 return
-            with lock:
-                node = get_node(node_id)
+            with state.lock:
+                node = state.get_node(node_id)
                 commands, node["pending"][:] = node["pending"][:], []
                 now = time.time()
                 for cmd in commands:
                     node["inflight"][str(cmd["id"])] = {"cmd": cmd, "ts": now}
-                _save_state()
-            _metric_inc("polls_served_total")
-            self._send_json(commands)
+                state_repo.mark_dirty()
+                pin_set = node_id in state.node_shell_pins
+            state.metric_inc("polls_served_total")
+            # Piggybacks on the poll every node already does every cycle
+            # (rather than a separate endpoint) so apps/common/fleetbridge.lua
+            # can cache "does THIS node have a shell PIN" locally, at zero
+            # extra network cost - see fleetos.lua's terminate handler for
+            # why that local cache matters (gating Ctrl+T on a live network
+            # round trip every time would be worse than the problem it
+            # solves). A header, not a body field, so /poll's existing
+            # "just a plain array of commands" response shape - which
+            # apps/common/fleetbridge.lua's poll() already parses - doesn't
+            # need to change at all.
+            self._send_json(commands, extra_headers={"X-Shell-Pin-Set": "1" if pin_set else "0"})
 
         elif self.path == "/health":
             # previously the only way to guess at bridge health was to
@@ -1016,13 +1477,13 @@ class Handler(BaseHTTPRequestHandler):
             # (or just a cron job) actually needs. No auth required, same as
             # "/"/"/dashboard" - a healthcheck probe that had to know an API
             # key first wouldn't be usable by most external tooling.
-            with lock:
+            with state.lock:
                 now = time.time()
                 recent = sum(
-                    1 for node in nodes.values()
+                    1 for node in state.nodes.values()
                     if node["latest_report_time"] and (now - node["latest_report_time"]) < HEALTH_RECENT_SECONDS
                 )
-                nodes_known = len(nodes)
+                nodes_known = len(state.nodes)
             self._send_json({
                 "ok": True,
                 "uptime_seconds": round(now - START_TIME, 1),
@@ -1038,36 +1499,53 @@ class Handler(BaseHTTPRequestHandler):
             # bridge.log. Deliberately plain JSON (not Prometheus exposition
             # format) - consistent with every other route here, and this
             # project has no other Prometheus-format consumer to justify it.
-            with lock:
+            with state.lock:
                 now = time.time()
-                snapshot = dict(metrics)
+                snapshot = dict(state.metrics)
             self._send_json({
                 "uptime_seconds": round(now - START_TIME, 1),
-                "nodes_known": len(nodes),
-                "results_stored": len(results_by_id),
+                "nodes_known": len(state.nodes),
+                "results_stored": len(state.results_by_id),
                 **snapshot,
             })
 
+        elif self.path == "/metrics/history":
+            # Same auth tier as /metrics itself (read-only key is enough -
+            # see the exempt-path check above do_GET's dispatch, which
+            # only requires the FULL key for "/admin/export").
+            range_key = (query.get("range") or ["hour"])[0]
+            result = _metrics_history_buckets_cached(range_key)
+            if result is None:
+                self._send_json(
+                    {"error": "invalid range - use one of: " + ", ".join(METRICS_HISTORY_RANGES)},
+                    status=400)
+                return
+            self._send_json(result)
+
         elif self.path == "/status":
-            with lock:
+            with state.lock:
                 now = time.time()
                 result = {}
-                for node_id, node in nodes.items():
+                for node_id, node in state.nodes.items():
                     ts = node["latest_report_time"]
                     result[node_id] = {
                         "latest_report": node["latest_report"],
                         "seconds_since_report": (now - ts) if ts else None,
-                        "folder": node_folders.get(node_id, ""),
+                        "folder": state.node_folders.get(node_id, ""),
+                        # surfaced for the dashboard's per-node status tab -
+                        # never the PIN itself (only ever stored as a hash,
+                        # see /admin/shell_pin), just whether one is set
+                        "shellPinSet": node_id in state.node_shell_pins,
                     }
                 self._send_json({"nodes": result})
 
         elif self.path.startswith("/result/"):
             cmd_id = self.path[len("/result/"):]
-            with lock:
-                entry = results_by_id.get(cmd_id)
+            with state.lock:
+                entry = state.results_by_id.get(cmd_id)
                 if entry is not None:
                     entry["fetched"] = True
-            _metric_inc("results_fetched_total")
+            state.metric_inc("results_fetched_total")
             self._send_json({"found": entry is not None, "result": entry["result"] if entry else None})
 
         elif self.path == "/admin/export":
@@ -1077,16 +1555,16 @@ class Handler(BaseHTTPRequestHandler):
             # into one downloadable JSON blob; POST /admin/import (below)
             # restores it. Full key required (not read-only) - this includes
             # every node's folder assignment and pending/inflight commands.
-            with lock:
+            with state.lock:
                 bundle = {
                     "version": STATE_VERSION,  # - same versioning as bridge_state.json/node_meta.json
                     "exported_at": time.time(),
-                    "node_folders": node_folders,
-                    "next_id": next_id,
-                    "broadcast_log": broadcast_log,
+                    "node_folders": state.node_folders,
+                    "next_id": state.next_id,
+                    "broadcast_log": state.broadcast_log,
                     "nodes": {
                         node_id: {"pending": node["pending"], "inflight": node["inflight"]}
-                        for node_id, node in nodes.items()
+                        for node_id, node in state.nodes.items()
                     },
                 }
             self._send_json(bundle)
@@ -1095,8 +1573,6 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"error": "not found"}, status=404)
 
     def do_POST(self):
-        global next_id
-
         if not self._check_rate_limit():
             return
 
@@ -1152,22 +1628,21 @@ class Handler(BaseHTTPRequestHandler):
             if not target:
                 self._send_json({"error": "command needs a 'node' (or \"*\" for every known node)"}, status=400)
                 return
-            with lock:
-                cmd["id"] = next_id
-                next_id += 1
+            with state.lock:
+                cmd["id"] = state.allocate_command_id()
                 if target == "*":
-                    for node in nodes.values():
+                    for node in state.nodes.values():
                         node["pending"].append(cmd)
-                    queued_to = list(nodes.keys())
+                    queued_to = list(state.nodes.keys())
                     # Remembered so a node that registers itself LATER (hadn't
                     # polled yet when this broadcast went out) still gets it -
                     # see get_node()'s seeding logic.
-                    broadcast_log.append({"id": cmd["id"], "ts": time.time(), "cmd": cmd})
+                    state.broadcast_log.append({"id": cmd["id"], "ts": time.time(), "cmd": cmd})
                 else:
-                    get_node(target)["pending"].append(cmd)
+                    state.get_node(target)["pending"].append(cmd)
                     queued_to = [target]
-                _save_state()
-            _metric_inc("commands_queued_total")
+                state_repo.mark_dirty()
+            state.metric_inc("commands_queued_total")
             self._send_json({"queued": True, "id": cmd["id"], "nodes": queued_to})
 
         elif self.path == "/node_folder":
@@ -1182,13 +1657,184 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"error": "node_folder needs 'node'"}, status=400)
                 return
             folder = (body.get("folder") or "").strip()
-            with lock:
+            with state.lock:
                 if folder:
-                    node_folders[node_id] = folder
+                    state.node_folders[node_id] = folder
                 else:
-                    node_folders.pop(node_id, None)
-                _save_node_folders()
+                    state.node_folders.pop(node_id, None)
+                state.save_node_folders()
             self._send_json({"ok": True})
+
+        elif self.path == "/admin/shell_pin":
+            # Sets (or, with pin="") clears the PIN apps/common/shell.lua
+            # requires locally before it'll run `bridge <url> [key]` on the
+            # given nodes - dashboard-only, full key + CSRF required like
+            # any other fleet-wide config push. "nodes" is always an
+            # explicit list (never a stored wildcard) - the dashboard
+            # resolves "all" to every currently-known node id client-side
+            # (see bulkSetShellPin), so this stays consistent with how
+            # every other bulk action here already works.
+            body = self._read_json_body()
+            if body is None:
+                return
+            node_ids = body.get("nodes")
+            if not isinstance(node_ids, list) or not node_ids:
+                self._send_json({"error": "shell_pin needs a non-empty 'nodes' list"}, status=400)
+                return
+            pin = body.get("pin") or ""
+            with state.lock:
+                for node_id in node_ids:
+                    if not isinstance(node_id, str) or not node_id:
+                        continue
+                    if pin:
+                        state.node_shell_pins[node_id] = _hash_shell_pin(pin)
+                    else:
+                        state.node_shell_pins.pop(node_id, None)
+                state.save_node_folders()
+            self._send_json({"ok": True})
+
+        elif self.path == "/admin/delete_node":
+            # Removes a node from the fleet view entirely (status,
+            # pending/inflight commands, folder assignment, shell PIN) -
+            # dashboard-only, full key + CSRF, same "nodes" list-of-ids
+            # convention as /admin/shell_pin above. Purely a bridge-side
+            # cleanup: this does NOT reach out to the node itself, so a
+            # still-alive node that keeps polling will simply reappear
+            # (via get_node()) on its next poll/report cycle - intended for
+            # clearing out stale/decommissioned/test entries, not for
+            # actually taking a live computer offline.
+            body = self._read_json_body()
+            if body is None:
+                return
+            node_ids = body.get("nodes")
+            if not isinstance(node_ids, list) or not node_ids:
+                self._send_json({"error": "delete_node needs a non-empty 'nodes' list"}, status=400)
+                return
+            with state.lock:
+                for node_id in node_ids:
+                    if not isinstance(node_id, str) or not node_id:
+                        continue
+                    state.nodes.pop(node_id, None)
+                    state.node_folders.pop(node_id, None)
+                    state.node_shell_pins.pop(node_id, None)
+                state.save_node_folders()
+                state_repo.mark_dirty()
+            self._send_json({"ok": True})
+
+        elif self.path == "/admin/spawn_sim_node":
+            # Starts a new Windows-simulated computer (windows/sim/<id>/,
+            # driven by run_sim_node.lua - see that file's header) as a
+            # real OS subprocess, so the dashboard's "Create emulation"
+            # button doesn't need a terminal open. Only useful for local
+            # dev/testing against this same bridge - never touches a real
+            # in-game computer. Gated by SIM_SPAWN_ENABLED (see its
+            # comment) on top of the usual full-key + CSRF requirement.
+            if not SIM_SPAWN_ENABLED:
+                self._send_json(
+                    {"error": "sim node spawning is disabled - set FLEET_ENABLE_SIM_SPAWN=1 "
+                              "on the bridge to allow starting local Lua sim processes from the dashboard"},
+                    status=403)
+                return
+            body = self._read_json_body()
+            if body is None:
+                return
+            node_id = (body.get("id") or "").strip()
+            if not is_valid_sim_node_id(node_id):
+                self._send_json({"error": "id must be 1-64 letters/digits/underscore/hyphen only"}, status=400)
+                return
+            role = (body.get("role") or "generic").strip() or "generic"
+            if not is_valid_sim_role(role):
+                self._send_json({"error": "role must be 1-32 letters/digits/space/underscore/hyphen"}, status=400)
+                return
+            lua_exe = shutil.which("lua")
+            if not lua_exe:
+                self._send_json(
+                    {"error": "no 'lua' interpreter found on PATH - install Lua 5.x to use sim nodes"},
+                    status=500)
+                return
+            with state.lock:
+                existing = state.sim_processes.get(node_id)
+                already_running = existing is not None and existing.poll() is None
+            if already_running:
+                self._send_json(
+                    {"error": f"a sim node named '{node_id}' is already running (pid {existing.pid})"}, status=409)
+                return
+
+            node_dir = os.path.join(SIM_DIR, node_id)
+            bridge_url = "http://127.0.0.1:" + str(self.server.server_address[1])
+            created = not os.path.isdir(node_dir)
+            if created:
+                try:
+                    os.makedirs(node_dir, exist_ok=True)
+                    shutil.copy2(FLEETOS_PATH, os.path.join(node_dir, "fleetos.lua"))
+                    shutil.copytree(APPS_DIR, os.path.join(node_dir, "apps"))
+                    startup_src = os.path.join(GAME_DIR, "startup.lua")
+                    if os.path.isfile(startup_src):
+                        shutil.copy2(startup_src, os.path.join(node_dir, "startup.lua"))
+                    # "clock" is deliberately NOT in here - it's a proof-of-
+                    # concept app that prints every 5s forever, which floods
+                    # the 200-line output buffer over any real session and
+                    # evicts actual command output/results within moments -
+                    # exactly the kind of thing that makes the Terminal feel
+                    # broken right when you're trying to use it.
+                    config_lua = (
+                        '-- auto-created by dashboard\'s "Create emulation" button\n'
+                        "return {id=%s, role=%s, startup={\"fleetbridge\"}}\n"
+                    ) % (lua_quote(node_id), lua_quote(role))
+                    with open(os.path.join(node_dir, "config.lua"), "w", encoding="utf-8") as f:
+                        f.write(config_lua)
+                except OSError as e:
+                    self._send_json({"error": "failed to set up sim node folder: " + str(e)}, status=500)
+                    return
+
+            # Alongside the other two log kinds (bridge/, nodes/), not
+            # inside node_dir itself - windows/sim/<id>/ is that node's
+            # simulated computer filesystem (what a real in-game computer's
+            # disk would look like), and a log file has no business mixed
+            # into that any more than it would belong on a real node's disk.
+            sim_logs_dir = os.path.join(LOGS_DIR, "sim")
+            os.makedirs(sim_logs_dir, exist_ok=True)
+            log_path = os.path.join(sim_logs_dir, node_id + "_console.log")
+            try:
+                log_file = open(log_path, "ab")
+                try:
+                    proc = subprocess.Popen(
+                        [lua_exe, RUN_SIM_NODE_PATH, bridge_url],
+                        cwd=node_dir, stdout=log_file, stderr=subprocess.STDOUT)
+                finally:
+                    log_file.close()  # child keeps its own OS-level handle once started
+            except OSError as e:
+                self._send_json({"error": "failed to start sim node: " + str(e)}, status=500)
+                return
+            with state.lock:
+                state.sim_processes[node_id] = proc
+            logger.info(f"[bridge] spawned sim node '{node_id}' (pid {proc.pid}, created={created})")
+            self._send_json({"ok": True, "id": node_id, "pid": proc.pid, "created": created})
+
+        elif self.path == "/shell_pin_check":
+            # Called by apps/common/shell.lua (NOT the dashboard - no CSRF
+            # header to send, so deliberately not in BROWSER_TRIGGERED_PATHS)
+            # before it lets a player at the physical computer repoint this
+            # node's bridge. Checked against whatever bridge is CURRENTLY
+            # configured, before any override takes effect - see that file's
+            # comment for why this has to be a server round trip rather than
+            # a locally-stored PIN. Same auth level as /poll and /report
+            # (whatever key, if any, this node already has), not full-key-only.
+            node_id = (query.get("node") or [None])[0]
+            if not node_id:
+                self._send_json({"error": "shell_pin_check needs ?node=<id>"}, status=400)
+                return
+            body = self._read_json_body()
+            if body is None:
+                return
+            pin = body.get("pin") or ""
+            with state.lock:
+                expected_hash = state.node_shell_pins.get(node_id)
+            if expected_hash is None:
+                self._send_json({"required": False, "ok": True})
+                return
+            ok = isinstance(pin, str) and hmac.compare_digest(_hash_shell_pin(pin), expected_hash)
+            self._send_json({"required": True, "ok": ok})
 
         elif self.path == "/report":
             node_id = (query.get("node") or [None])[0]
@@ -1198,19 +1844,15 @@ class Handler(BaseHTTPRequestHandler):
             body = self._read_json_body()
             if body is None:
                 return
-            output = body.get("output")
-            if isinstance(output, list) and len(output) > MAX_OUTPUT_LINES_STORED:
-                body["output"] = output[-MAX_OUTPUT_LINES_STORED:]
-            with lock:
-                node = get_node(node_id)
-                node["latest_report"] = body
-                node["latest_report_time"] = time.time()
+            with state.lock:
+                node = state.get_node(node_id)
+                _merge_report(node, node_id, body)
                 now = time.time()
                 for item in body.get("results", []):
                     cmd = item.get("command", {})
                     cmd_id = cmd.get("id")
                     if cmd_id is not None:
-                        results_by_id[str(cmd_id)] = {"result": item.get("result"), "ts": now, "fetched": False}
+                        state.results_by_id[str(cmd_id)] = {"result": item.get("result"), "ts": now, "fetched": False}
                         # The command finished executing - stop treating it as
                         # in-flight so _sweep_inflight() doesn't requeue it.
                         node["inflight"].pop(str(cmd_id), None)
@@ -1220,16 +1862,13 @@ class Handler(BaseHTTPRequestHandler):
                     # would silently orphan itself on the old, now-dead id.
                     result = item.get("result") or {}
                     if cmd.get("type") == "rename" and result.get("renamed") and cmd.get("newId"):
-                        old_folder = node_folders.pop(node_id, None)
+                        old_folder = state.node_folders.pop(node_id, None)
                         if old_folder:
-                            node_folders[cmd["newId"]] = old_folder
-                            _save_node_folders()
-                _prune_results()
-                _save_state()
-            stored_output = body.get("output")
-            if isinstance(stored_output, list):
-                _log_node_output(node_id, stored_output)
-            _metric_inc("reports_received_total")
+                            state.node_folders[cmd["newId"]] = old_folder
+                            state.save_node_folders()
+                state.prune_results()
+                state_repo.mark_dirty()
+            state.metric_inc("reports_received_total")
             self._send_json({"ok": True})
 
         elif self.path == "/apps":
@@ -1539,15 +2178,20 @@ class Handler(BaseHTTPRequestHandler):
                     status=503)
                 return
             try:
-                with lock:
-                    cmd = {"id": next_id, "type": "world_call", "action": action, "args": body.get("args") or {}}
-                    next_id += 1
-                    get_node(node_id)["pending"].append(cmd)
-                    cmd_id = cmd["id"]
+                with state.lock:
+                    cmd_id = state.allocate_command_id()
+                    cmd = {"id": cmd_id, "type": "world_call", "action": action, "args": body.get("args") or {}}
+                    state.get_node(node_id)["pending"].append(cmd)
+                    # Bug fix: this queues onto the same persisted `pending`/
+                    # next_id state /command does (which DOES call this) -
+                    # missing it here meant a world_call queued right before
+                    # a crash/kill could vanish on restart with no trace,
+                    # silently (not even the timeout error path below runs).
+                    state_repo.mark_dirty()
                 deadline = time.time() + WORLD_CALL_TIMEOUT_SECONDS
                 while time.time() < deadline:
-                    with lock:
-                        entry = results_by_id.get(str(cmd_id))
+                    with state.lock:
+                        entry = state.results_by_id.get(str(cmd_id))
                     if entry is not None:
                         self._send_json(entry["result"])
                         return
@@ -1584,24 +2228,24 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(body, dict) or "nodes" not in body:
                 self._send_json({"error": "not a valid export bundle"}, status=400)
                 return
-            with lock:
-                node_folders.clear()
-                node_folders.update(body.get("node_folders") or {})
-                broadcast_log[:] = body.get("broadcast_log") or []
-                next_id = body.get("next_id", next_id)
+            with state.lock:
+                state.node_folders.clear()
+                state.node_folders.update(body.get("node_folders") or {})
+                state.broadcast_log[:] = body.get("broadcast_log") or []
+                state.next_id = body.get("next_id", state.next_id)
                 new_nodes = {}
                 for node_id, saved in (body.get("nodes") or {}).items():
-                    old = nodes.get(node_id)
+                    old = state.nodes.get(node_id)
                     new_nodes[node_id] = {
                         "pending": saved.get("pending", []),
                         "inflight": saved.get("inflight", {}),
                         "latest_report": old["latest_report"] if old else None,
                         "latest_report_time": old["latest_report_time"] if old else None,
                     }
-                nodes.clear()
-                nodes.update(new_nodes)
-                _save_node_folders()
-                _save_state()
+                state.nodes.clear()
+                state.nodes.update(new_nodes)
+                state.save_node_folders()
+                state_repo.mark_dirty()
             self._send_json({"ok": True})
 
         elif self.path == "/admin/reload":
@@ -1622,8 +2266,8 @@ class Handler(BaseHTTPRequestHandler):
             # process as "gone" even though a new one is already serving
             # requests - re-run run_bridge_background.bat afterward if you
             # need bridge.pid/stop_bridge.bat to point at the right PID again.
-            with lock:
-                _save_state()
+            with state.lock:
+                state_repo.save(state)
             self._send_json({"ok": True, "reloading": True})
 
             def _do_reload():
@@ -1638,6 +2282,16 @@ class Handler(BaseHTTPRequestHandler):
 
 
 class Server(ThreadingHTTPServer):
+    # socketserver's default backlog (5) is well below what
+    # test_bridge_server_load.py's own concurrency (up to 32 worker
+    # threads hitting this server at once) needs - fine on a fast local
+    # machine where accept() keeps up, but a slower/more loaded CI runner
+    # can let the OS's backlog fill up first, resetting the excess
+    # connections (seen as ConnectionResetError in the load tests, not a
+    # bug in the test itself). A real fleet's bursts (many nodes polling
+    # at once, a broadcast command fan-out) aren't smaller than this.
+    request_queue_size = 128
+
     def handle_error(self, request, client_address):
         # A client (dashboard.html's polling, a curl with -m, a rebooting
         # node) closing/aborting mid-response is normal and frequent - the
@@ -1693,6 +2347,22 @@ def main():
     # key.pem -out cert.pem -days 365`). Once enabled, every node's
     # config.lua bridgeUrl and dashboard.html's bridge address need to say
     # https:// instead of http://.
+    #
+    # Deliberately still OPT-IN, not required, even when host != 127.0.0.1 -
+    # Radmin VPN (this project's own documented, first-class way to reach a
+    # bridge beyond localhost - see start_bridge_mc.bat/docs/fleetos_guide.
+    # html) already encrypts the whole tunnel itself, so forcing a second,
+    # app-level TLS layer on top would just be cert-generation friction for
+    # no real security gain in that specific, common case. This can't tell
+    # "bound to a VPN's virtual interface" apart from "bound to a real
+    # public/port-forwarded interface" from here (both are just some
+    # non-127.0.0.1 IP) - so instead of guessing, warn loudly and let the
+    # operator judge their own network. Trying to build no-dependency
+    # (`Stdlib only, no pip install needed` - see this file's own header)
+    # auto-cert-generation isn't realistic either: Python's stdlib ssl
+    # module can only USE a cert, not create one, and shelling out to
+    # openssl.exe (like other best-effort helpers in this file) can't be
+    # assumed present on a stock Windows install the way curl.exe can.
     tls_cert = os.environ.get("FLEET_TLS_CERT")
     tls_key = os.environ.get("FLEET_TLS_KEY")
     scheme = "http"
@@ -1703,6 +2373,23 @@ def main():
         server.socket = ctx.wrap_socket(server.socket, server_side=True)
         scheme = "https"
         logger.info("[bridge] TLS enabled (FLEET_TLS_CERT/FLEET_TLS_KEY set)")
+    elif host != "127.0.0.1":
+        logger.warning("[bridge] ==================================================================")
+        logger.warning("[bridge] WARNING: bound to " + host + " (beyond localhost) over plain HTTP, no TLS.")
+        logger.warning("[bridge] If this is only reachable over a VPN you already trust (Radmin,")
+        logger.warning("[bridge] Tailscale, etc.) that tunnel is already encrypted end-to-end - this")
+        logger.warning("[bridge] is fine as-is, nothing more to do.")
+        logger.warning("[bridge] If this is reachable over the OPEN INTERNET instead (a forwarded")
+        logger.warning("[bridge] router port, a cloud VM's public IP, etc.) - your API key and every")
+        logger.warning("[bridge] command/file you send travel in CLEARTEXT and can be read or")
+        logger.warning("[bridge] altered by anyone between you and this PC. Fix it:")
+        logger.warning("[bridge]   openssl req -x509 -newkey rsa:2048 -nodes -days 365 \\")
+        logger.warning("[bridge]     -keyout key.pem -out cert.pem -subj \"/CN=fleetos-bridge\"")
+        logger.warning("[bridge]   set FLEET_TLS_CERT=cert.pem")
+        logger.warning("[bridge]   set FLEET_TLS_KEY=key.pem")
+        logger.warning("[bridge] then restart the bridge and switch every bridgeUrl/dashboard address")
+        logger.warning("[bridge] from http:// to https://.")
+        logger.warning("[bridge] ==================================================================")
 
     logger.info(f"[bridge] listening on {scheme}://{host}:{port}")
     if API_KEY:
@@ -1711,6 +2398,8 @@ def main():
         logger.info("[bridge] FLEET_BRIDGE_READONLY_KEY is set - grants read-only access")
     if COMPUTE_ENABLED:
         logger.info("[bridge] FLEET_ENABLE_COMPUTE=1 - /compute/<name> scripts CAN be executed")
+    if SIM_SPAWN_ENABLED:
+        logger.info("[bridge] FLEET_ENABLE_SIM_SPAWN=1 - /admin/spawn_sim_node CAN start local Lua sim processes")
     logger.info("[bridge] make sure apps/fleetbridge.lua's BASE_URL matches this address")
     logger.info("[bridge] and that computercraft-server.toml allows http to it (see windows/README.md)")
     logger.info(f"[bridge] logging to {LOG_PATH}")
@@ -1737,8 +2426,8 @@ def main():
     except (KeyboardInterrupt, SystemExit):
         logger.info("\n[bridge] stopping - saving state")
     finally:
-        with lock:
-            _save_state()
+        with state.lock:
+            state_repo.save(state)
         server.server_close()
         logger.info("[bridge] state saved, exiting")
 

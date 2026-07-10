@@ -61,6 +61,21 @@ local function resume(...)
     end
 end
 
+-- Waits out `seconds` of real wall-clock time - see run_sim_node.lua's copy
+-- of this same helper for the full rationale (no compiler available to
+-- build LuaSocket for a real sub-second sleep; Windows' `ping -n N` batch
+-- trick only has ~1s-per-packet granularity, which was silently flooring
+-- every sub-1s sleep - see craftos_shim.lua's os.startTimer comment).
+local function sleepSeconds(seconds)
+    if not seconds or seconds <= 0 then return end
+    if seconds < 1 then
+        local target = os.clock() + seconds
+        while os.clock() < target do end
+    else
+        os.execute(("ping -n %d 127.0.0.1 >NUL 2>&1"):format(math.floor(seconds) + 1))
+    end
+end
+
 -- boots the kernel up to its first event wait
 resume()
 
@@ -68,10 +83,7 @@ while coroutine.status(mainCo) ~= "dead" do
     local id, fireAt = shim.nextTimer()
 
     if id then
-        local remaining = fireAt - os.time()
-        if remaining > 0 then
-            os.execute(("ping -n %d 127.0.0.1 >NUL 2>&1"):format(remaining + 1))
-        end
+        sleepSeconds(fireAt - os.clock())
         shim.consumeTimer(id)
         resume("timer", id)
     else
@@ -81,7 +93,7 @@ while coroutine.status(mainCo) ~= "dead" do
         -- to run up to their own first yield/timer. The short real wait
         -- bounds CPU usage if some task never starts a timer at all.
         resume("fleetos_tick")
-        os.execute("ping -n 2 127.0.0.1 >NUL 2>&1")
+        sleepSeconds(0.05)
     end
 end
 

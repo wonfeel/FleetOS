@@ -1,0 +1,17 @@
+# Only what the Dockerfile's COPY lines actually need ever gets sent to the
+# build context in the first place per those COPY lines, but this also
+# keeps `docker build`'s context-upload step itself fast by not scanning/
+# hashing everything else in the repo.
+.git/
+.claude/
+reference/
+test/
+windows/sim/
+windows/logs/
+windows/*.log
+windows/*.log.*
+windows/bridge_state.json
+windows/node_meta.json
+windows/bridge_key.txt
+__pycache__/
+*.pyc

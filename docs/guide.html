@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Триангуляция вышек - гайд</title>
+<title>Триангуляция вышек, гайд</title>
 <style>
   :root{
     --bg: #0c0f0d;
@@ -229,8 +229,8 @@
 <div class="crt-header">
   <div class="wrap" style="padding:0;">
     <div class="path">craftos&gt; edit README<span class="cursor"></span></div>
-    <h1>Триангуляция вышек - гайд по запуску</h1>
-    <div class="sub">raytower.lua - один файл, ComputerCraft / CC:Tweaked</div>
+    <h1>Триангуляция вышек, гайд по запуску</h1>
+    <div class="sub">raytower.lua, один файл, ComputerCraft / CC:Tweaked</div>
   </div>
 </div>
 
@@ -248,8 +248,8 @@
 
 <section id="files">
   <h2><span class="tag">01</span>Файл</h2>
-  <p>Один файл - <code>raytower.lua</code>. Роль выбирается аргументом при запуске, поэтому на master и на все вышки заливается одно и то же.</p>
-  <div class="callout"><strong>Структура проекта:</strong> всё, что реально копируется в Minecraft, лежит в <code>game/</code> (в т.ч. <code>raytower.lua</code>, <code>fleetos.lua</code>, <code>apps/</code>). Папки <code>windows/</code> и <code>test/</code> - только локальные инструменты для проверки на ПК без игры, их в игру заливать не нужно.</div>
+  <p>Один файл, <code>raytower.lua</code>. Роль выбирается аргументом при запуске, поэтому на master и на все вышки заливается одно и то же.</p>
+  <div class="callout"><strong>Структура проекта:</strong> всё, что реально копируется в Minecraft, лежит в <code>game/</code> (в т.ч. <code>raytower.lua</code>, <code>fleetos.lua</code>, <code>apps/</code>). Папки <code>windows/</code> и <code>test/</code>, только локальные инструменты для проверки на ПК без игры, их в игру заливать не нужно.</div>
 </section>
 
 <section id="setup">
@@ -261,18 +261,18 @@
   </div>
 
   <div class="tab-panel active" id="tab-master">
-    <p class="dim">Прикрепи wireless/ender modem (и опционально monitor - сам покажет таблицу с позицией), запусти:</p>
+    <p class="dim">Прикрепи wireless/ender modem (и опционально monitor, сам покажет таблицу с позицией), запусти:</p>
     <div class="codeblock">
       <div class="bar"><span>craftos</span><button class="copy-btn" onclick="copyCode(this,'m1')">копировать</button></div>
       <pre id="m1">raytower master listen</pre>
     </div>
-    <div class="callout">Автозапуск после перезагрузки настраивается сам - создаётся <code>startup.lua</code>.</div>
-    <p class="dim">По умолчанию <code>forward = (1,0,0)</code>, знаки кватерниона не меняются. Если после калибровки (см. раздел 04) нашлась другая комбинация - передай её аргументами:</p>
+    <div class="callout">Автозапуск после перезагрузки настраивается сам, создаётся <code>startup.lua</code>.</div>
+    <p class="dim">По умолчанию <code>forward = (1,0,0)</code>, знаки кватерниона не меняются. Если после калибровки (см. раздел 04) нашлась другая комбинация, передай её аргументами:</p>
     <div class="codeblock">
       <div class="bar"><span>craftos</span><button class="copy-btn" onclick="copyCode(this,'m1b')">копировать</button></div>
       <pre id="m1b">raytower master listen fx fy fz sx sy sz</pre>
     </div>
-    <p class="dim">Например: <code>raytower master listen 1 0 0 -1 1 1</code> - forward=(1,0,0), знак X-компоненты кватерниона инвертирован.</p>
+    <p class="dim">Например: <code>raytower master listen 1 0 0 -1 1 1</code>, forward=(1,0,0), знак X-компоненты кватерниона инвертирован.</p>
   </div>
 
   <div class="tab-panel" id="tab-slave">
@@ -281,7 +281,7 @@
       <div class="bar"><span>craftos</span><button class="copy-btn" onclick="copyCode(this,'s1')">копировать</button></div>
       <pre id="s1">raytower slave</pre>
     </div>
-    <div class="callout">Правок не нужно - id, позиция и направление берутся автоматически.</div>
+    <div class="callout">Правок не нужно, id, позиция и направление берутся автоматически.</div>
   </div>
 </section>
 
@@ -302,7 +302,7 @@
 
 <section id="calibrate">
   <h2><span class="tag">04</span>Калибровка луча</h2>
-  <p>Если луч "уходит вбок" - это не баг, а неверная комбинация forward-оси / знаков кватерниона для твоей вышки. Подобрать вручную сложно, поэтому есть автоматический перебор:</p>
+  <p>Если луч "уходит вбок", это не баг, а неверная комбинация forward-оси / знаков кватерниона для твоей вышки. Подобрать вручную сложно, поэтому есть автоматический перебор:</p>
   <ol class="steps">
     <li>Запусти <code>raytower master listen debug</code> на минуту, чтобы <code>rays.dat</code> заполнился реальными <code>origin</code>/<code>quat</code> от вышек (в debug-режиме они печатаются в консоль).</li>
     <li>Встань ровно в точку, куда физически наведены вышки, и посмотри свои координаты (F3).</li>
@@ -312,7 +312,7 @@
         <pre id="cal1">raytower master calibrate 1859.65 17.98 1591.59</pre>
       </div>
     </li>
-    <li>Скрипт выведет топ-5 комбинаций <code>forward</code>/<code>qsign</code>, отсортированных по угловой ошибке (меньше - лучше). Возьми первую строку.</li>
+    <li>Скрипт выведет топ-5 комбинаций <code>forward</code>/<code>qsign</code>, отсортированных по угловой ошибке (меньше, лучше). Возьми первую строку.</li>
     <li>Запускай <code>listen</code> с этими значениями:
       <div class="codeblock">
         <div class="bar"><span>craftos</span><button class="copy-btn" onclick="copyCode(this,'cal2')">копировать</button></div>
@@ -320,21 +320,21 @@
       </div>
     </li>
   </ol>
-  <div class="callout">Чем больше вышек участвовало в снимке для калибровки - тем надёжнее результат (каждая добавляет свою невязку в среднюю ошибку).</div>
+  <div class="callout">Чем больше вышек участвовало в снимке для калибровки, тем надёжнее результат (каждая добавляет свою невязку в среднюю ошибку).</div>
 </section>
 
 <section id="monitor">
   <h2><span class="tag">05</span>Монитор</h2>
-  <p>Если к master-компьютеру подключён <code>monitor</code> (обычный или advanced) - он находится автоматически, ничего настраивать не нужно. На нём выводится таблица: список активных вышек с их координатами и крупно X/Y/Z найденной позиции. Обновляется каждый опрос.</p>
+  <p>Если к master-компьютеру подключён <code>monitor</code> (обычный или advanced), он находится автоматически, ничего настраивать не нужно. На нём выводится таблица: список активных вышек с их координатами и крупно X/Y/Z найденной позиции. Обновляется каждый опрос.</p>
 </section>
 
 <section id="accuracy">
   <h2><span class="tag">06</span>Точность</h2>
-  <p>Позиция считается методом наименьших квадратов - точка, сумма квадратов расстояний от которой до всех лучей минимальна (не среднее арифметическое пересечений). Реальная точность зависит не от математики (двойная точность Lua даёт околонулевую погрешность вычислений), а от:</p>
+  <p>Позиция считается методом наименьших квадратов, точка, сумма квадратов расстояний от которой до всех лучей минимальна (не среднее арифметическое пересечений). Реальная точность зависит не от математики (двойная точность Lua даёт околонулевую погрешность вычислений), а от:</p>
   <ul>
-    <li><b>Числа вышек</b> - больше вышек, участвующих в расчёте одновременно, снижают влияние шума каждой отдельной;</li>
-    <li><b>Разброса углов</b> - лучи под сильно разными углами друг к другу дают устойчивое решение; почти параллельные лучи (вышки рядом и смотрят в одну сторону) - источник большой погрешности, вплоть до <code>"rays are parallel or degenerate"</code>;</li>
-    <li><b>Точности origin/quat от самой игры</b> - если Sable отдаёт координаты/ориентацию с шумом или округлением, это прямо передаётся в результат.</li>
+    <li><b>Числа вышек</b>, больше вышек, участвующих в расчёте одновременно, снижают влияние шума каждой отдельной;</li>
+    <li><b>Разброса углов</b>, лучи под сильно разными углами друг к другу дают устойчивое решение; почти параллельные лучи (вышки рядом и смотрят в одну сторону), источник большой погрешности, вплоть до <code>"rays are parallel or degenerate"</code>;</li>
+    <li><b>Точности origin/quat от самой игры</b>, если Sable отдаёт координаты/ориентацию с шумом или округлением, это прямо передаётся в результат.</li>
   </ul>
   <div class="callout">С 2 вышками решение существует, но крайне чувствительно к шуму. Рекомендуется 3+ вышки под разными углами.</div>
 </section>
@@ -349,7 +349,7 @@
 
   <details>
     <summary>Master не видит вышки</summary>
-    <div class="body">Проверь дистанцию (wireless modem ограничен радиусом, ender - без ограничения) и что <code>raytower slave</code> реально запущен.</div>
+    <div class="body">Проверь дистанцию (wireless modem ограничен радиусом, ender, без ограничения) и что <code>raytower slave</code> реально запущен.</div>
   </details>
 
   <details>
@@ -359,7 +359,7 @@
 
   <details>
     <summary>Луч уходит вбок / мимо цели</summary>
-    <div class="body">Нужна калибровка - см. раздел 04. Простой перебор осей руками почти никогда не помогает, если дело в знаке кватерниона (handedness), а не в самой оси.</div>
+    <div class="body">Нужна калибровка, см. раздел 04. Простой перебор осей руками почти никогда не помогает, если дело в знаке кватерниона (handedness), а не в самой оси.</div>
   </details>
 </section>
 

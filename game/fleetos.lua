@@ -1,3 +1,4 @@
+-- fleetos.lua
 -- Stage 1: kernel - cooperative multitasking on coroutines + program manager.
 -- Programs live in /apps/<name>.lua and are started with spawn(name).
 --
@@ -54,6 +55,13 @@ local APP_GROUPS = { "common", "raytower" }
 local OUTPUT = {}         -- plain strings, one per completed line
 local COLORED = {}        -- parallel: each entry is { {text=,color=}, ... } segments for that line
 local MAX_OUTPUT_LINES = 500
+-- Total number of completed lines ever flushed, monotonic (never reset,
+-- never decreases even as old OUTPUT entries get trimmed from the front
+-- below) - lets getOutputSince() answer "what's new since cursor X" without
+-- OUTPUT's own trimming making array indices an unstable cursor to hand
+-- back to a caller across calls. See getOutputSince()'s own comment for how
+-- it's used.
+local outputSeq = 0
 local currentLine = ""       -- accumulates text between newlines, e.g. printStatus()
 local currentColors = {}     -- currentColors[i] = color of currentLine's i-th character,
                               -- tracked PER CHARACTER (not per chunk) so a cursor-positioned
@@ -116,6 +124,7 @@ end
 local function flushLine()
     OUTPUT[#OUTPUT + 1] = currentLine
     COLORED[#COLORED + 1] = buildSegments(currentLine, currentColors)
+    outputSeq = outputSeq + 1
     currentLine = ""
     currentColors = {}
     cursorCol = 1
@@ -165,6 +174,39 @@ local function tailWithCurrent(all, current, isEmpty, n)
     local out = {}
     for i = #list - n + 1, #list do out[#out + 1] = list[i] end
     return out
+end
+
+-- Delta view for a low-bandwidth caller (apps/common/fleetbridge.lua's
+-- report()) that would otherwise resend the same ~150 lines every single
+-- cycle via getOutput() above. `cursor` is whatever outputSeq value a
+-- previous call returned (0 the first time). Returns:
+--   newLines  - only the COMPLETE lines flushed since cursor (never
+--               includes the in-progress line - see `tail` below for that)
+--   newCursor - pass this back in next time
+--   tail      - the current in-progress line's text RIGHT NOW (e.g. a
+--               "shell> " prompt still waiting on Enter), always returned
+--               fresh since it can change without ever flushing a new
+--               line - a caller that only appended newLines and ignored
+--               this would never show a live-but-not-yet-terminated line
+--               until it finally completes.
+-- If cursor is older than the oldest line still held (this node went a
+-- very long time between calls, past MAX_OUTPUT_LINES worth of output),
+-- there's no way to recover what was trimmed - falls back to returning
+-- everything currently held, same as getOutput() would.
+local function getOutputSince(cursor)
+    cursor = cursor or 0
+    local oldestKeptSeq = outputSeq - #OUTPUT + 1
+    local newLines
+    if cursor >= outputSeq then
+        newLines = {}
+    elseif cursor < oldestKeptSeq - 1 then
+        newLines = OUTPUT
+    else
+        local startIdx = cursor - oldestKeptSeq + 2
+        newLines = {}
+        for i = startIdx, #OUTPUT do newLines[#newLines + 1] = OUTPUT[i] end
+    end
+    return newLines, outputSeq, currentLine
 end
 
 -- Real CraftOS's bios print()/write() are plain Lua functions that
@@ -503,7 +545,7 @@ end
 -- Lists every app available to run, grouped by folder (in APP_GROUPS
 -- order, flat apps/ last since it's the exception, not the norm).
 -- A leading underscore marks a shared helper module (e.g.
--- apps/raytower/_raytower_auth.lua) meant to be dofile()'d directly by its
+-- apps/common/_signed_rednet.lua) meant to be dofile()'d directly by its
 -- full path, not spawned as a standalone task - same convention
 -- windows/compute/_fleetos_world.py already uses for the same reason.
 -- Excluded here so it doesn't show up as something you'd "run".
@@ -542,10 +584,6 @@ local function listAvailableApps()
         end
     end
     return groups
-end
-
-local function appExists(name)
-    return resolveAppPath(name) ~= nil
 end
 
 -- previously there was no way to tell WHICH version of an app's code is
@@ -839,6 +877,87 @@ local function loadConfig()
     if startupOverride then cfg.startup = startupOverride end
     return cfg
 end
+
+-- ============================================================
+-- Shell PIN check - lives HERE in the kernel, not in
+-- apps/common/fleetbridge.lua, on purpose: it has to be callable from the
+-- very first tick, before any app has ever been resumed. If this were
+-- registered by fleetbridge.lua's own top-level code instead (the way
+-- setBridge/etc. above are used by apps/common/shell.lua), it would only
+-- exist once fleetbridge's coroutine got its FIRST resume - and
+-- game/config.lua's own default startup list is {"shell", "fleetbridge"},
+-- shell first. A node booted with that exact default (or the Windows
+-- emulation, where apps/common/shell.lua's read() blocks the whole
+-- process - see its own comment - so fleetbridge can never get a resume
+-- in until the shell prompt returns one) would have its very first
+-- `bridge` command sail straight through with no PIN check at all,
+-- silently defeating the whole feature. Small deliberate duplication of
+-- fleetbridge.lua's BASE_URL/NODE_ID resolution instead of depending on
+-- it having run.
+-- ============================================================
+
+local SHELL_PIN_ID_OVERRIDE_FILE = "node_id.txt"
+
+local function shellPinUrlEncode(s)
+    if textutils.urlEncode then return textutils.urlEncode(s) end
+    return (s:gsub("[^%w%-%.~_]", function(c) return ("%%%02X"):format(c:byte()) end))
+end
+
+local function currentBridgeUrlAndKey()
+    local override = getBridgeOverride()
+    if override then return override.url, override.key or "" end
+    local cfg = loadConfig()
+    local envKey = os.getenv and os.getenv("FLEET_BRIDGE_KEY")
+    return cfg.bridgeUrl or "http://127.0.0.1:8787", envKey or cfg.apiKey or ""
+end
+
+local function currentNodeId()
+    if fs.exists(SHELL_PIN_ID_OVERRIDE_FILE) then
+        local f = fs.open(SHELL_PIN_ID_OVERRIDE_FILE, "r")
+        local id = f.readAll()
+        f.close()
+        if id and id ~= "" then return id end
+    end
+    return loadConfig().id or ("node_" .. os.getComputerID())
+end
+
+-- Returns (required, ok, err) - see apps/common/shell.lua's call site for
+-- how this gates the `bridge` command. A network failure fails safe as
+-- required=true, ok=false rather than letting the override through
+-- silently when the bridge can't be reached to ask.
+local function checkShellPin(pin)
+    local url, key = currentBridgeUrlAndKey()
+    local fullUrl = url .. "/shell_pin_check?node=" .. shellPinUrlEncode(currentNodeId())
+    local headers = { ["Content-Type"] = "application/json" }
+    if key ~= "" then headers["X-API-Key"] = key end
+    http.request({ url = fullUrl, body = textutils.serializeJSON({ pin = pin or "" }), headers = headers, timeout = 8 })
+    local timerId = os.startTimer(8)
+    while true do
+        local event, a, b = os.pullEvent()
+        if event == "http_success" and a == fullUrl then
+            os.cancelTimer(timerId)
+            local body = b.readAll()
+            b.close()
+            local ok, decoded = pcall(textutils.unserializeJSON, body)
+            if not ok or type(decoded) ~= "table" then return true, false, "bad response from bridge" end
+            return decoded.required == true, decoded.ok == true
+        elseif event == "http_failure" and a == fullUrl then
+            os.cancelTimer(timerId)
+            return true, false, "couldn't reach bridge: " .. tostring(b)
+        elseif event == "timer" and a == timerId then
+            return true, false, "timed out waiting for bridge"
+        end
+    end
+end
+
+-- Cached locally (see /poll's X-Shell-Pin-Set response header, refreshed
+-- every poll cycle by apps/common/fleetbridge.lua) so the terminate
+-- handler further below never has to make a network call just to find out
+-- whether Ctrl+T needs gating AT ALL - a node that never had a PIN set
+-- keeps today's instant, network-free Ctrl+T. Only once this is true does
+-- pressing Ctrl+T actually pay for a live checkShellPin() round trip.
+local cachedShellPinSet = false
+local function markShellPinSet(isSet) cachedShellPinSet = isSet end
 
 -- ============================================================
 -- Kernel shell - press keys to list/kill tasks without stopping the loop
@@ -1204,10 +1323,39 @@ local function boot()
     while true do
         local event = { os.pullEventRaw() }
         if event[1] == "terminate" then
-            print("FleetOS: terminate received, stopping all tasks.")
-            break
+            if not cachedShellPinSet then
+                print("FleetOS: terminate received, stopping all tasks.")
+                break
+            end
+            -- A PIN is configured for this node - Ctrl+T alone isn't
+            -- enough to stop the kernel (see the "Shell PIN check" section
+            -- above). pcall wraps the whole prompt+verify sequence: read()
+            -- and checkShellPin() both use the normal (throwing) form of
+            -- pullEvent internally, so a second Ctrl+T pressed WHILE this
+            -- is already waiting would otherwise escape as an uncaught
+            -- "Terminated" error - which would still end up dropping to
+            -- the native CraftOS shell, the exact outcome this exists to
+            -- prevent. Any failure here (including that) resolves to
+            -- "stay up", never "stop".
+            local promptOk, pinCorrect = pcall(function()
+                term.setTextColor(colors.yellow)
+                print("FleetOS: terminate blocked - shell PIN required to stop.")
+                term.setTextColor(colors.white)
+                io.write("PIN: ")
+                io.flush()
+                local typed = read("*")
+                local _, ok = checkShellPin(typed or "")
+                return ok
+            end)
+            if promptOk and pinCorrect then
+                print("FleetOS: PIN correct - stopping all tasks.")
+                break
+            else
+                print("FleetOS: staying up (wrong/no PIN entered).")
+            end
+        else
+            tick(event)
         end
-        tick(event)
     end
 end
 
@@ -1246,6 +1394,10 @@ _G.fleetos = {
     setBridge = setBridgeOverride,
     clearBridge = clearBridgeOverride,
     getBridgeInfo = getBridgeOverride,
+    -- see the "Shell PIN check" section above for why this lives here
+    -- instead of apps/common/fleetbridge.lua.
+    checkShellPin = checkShellPin,
+    markShellPinSet = markShellPinSet,
     -- bulk-configurable startup app list, same override-file pattern
     -- as the bridge address above - see setStartupOverride's comment.
     setStartup = setStartupOverride,
@@ -1255,6 +1407,11 @@ _G.fleetos = {
     -- short content-checksum "version" for a given app - see
     -- appVersion's own comment above. nil if the app doesn't exist.
     appVersion = appVersion,
+    -- the same cheap, non-cryptographic checksum appVersion uses above,
+    -- exposed generically - apps/common/fleetbridge.lua's report() reuses
+    -- this to detect "did the monitor snapshot actually change since last
+    -- report" instead of a bespoke hash of its own.
+    checksum = simpleChecksum,
     -- resolves where an app's file lives (its existing group folder if
     -- any), or where a brand new one should be created (flat apps/) -
     -- used by fleetbridge.lua's deploy/rollback so it writes to the same
@@ -1293,6 +1450,11 @@ _G.fleetos = {
     getOutput = function(n)
         return tailWithCurrent(OUTPUT, currentLine, currentLine == "", n)
     end,
+    -- see getOutputSince()'s own comment above for the (newLines, cursor,
+    -- tail) contract - a low-bandwidth alternative to getOutput() for a
+    -- caller that reports on a cycle and wants to avoid resending the same
+    -- lines every time.
+    getOutputSince = getOutputSince,
     -- Same as getOutput(), but each line is a list of {text=, color=}
     -- segments instead of a plain string - lets a monitor (or anything
     -- else that can show color) reproduce this computer's screen

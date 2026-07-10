@@ -16,7 +16,73 @@
 -- about read()'s blocking-io.read limitation below, only where it applies.
 _G.CRAFTOS_EMULATION = true
 
+-- ---- bit: matches CC:Tweaked's bios.lua global `bit` table exactly (same
+-- function names: band/bor/bxor/bnot/blshift/brshift/blogic_rshift - the
+-- legacy "bit" library shape CC:Tweaked's bios.lua builds from its internal
+-- bit32, and exposes to every computer's user scripts). apps/common/
+-- _sha256.lua (real HMAC-SHA256 signing, see _signed_rednet.lua) is the
+-- only current caller, but this is a general-purpose shim, not a
+-- SHA-specific one. This Windows Lua build is 5.4, which has real 64-bit
+-- integers and native bitwise operators - each function masks its result
+-- to 32 bits so behavior matches CC:Tweaked's actual 32-bit semantics
+-- exactly, not just "whatever a wider native op happens to produce".
+local BIT_MASK32 = 0xFFFFFFFF
+bit = {
+    band = function(a, b) return (a & b) & BIT_MASK32 end,
+    bor = function(a, b) return (a | b) & BIT_MASK32 end,
+    bxor = function(a, b) return (a ~ b) & BIT_MASK32 end,
+    bnot = function(a) return (~a) & BIT_MASK32 end,
+    blshift = function(a, n) return (a << n) & BIT_MASK32 end,
+    -- Lua 5.4's native >> is already logical (zero-filling) per the
+    -- manual, so blogic_rshift needs no extra sign handling - only
+    -- brshift (arithmetic/sign-extending) does.
+    blogic_rshift = function(a, n) return (a & BIT_MASK32) >> n end,
+    brshift = function(a, n)
+        -- Bug fix: for n >= 33, "32 - n" goes negative, and Lua 5.4's <<
+        -- treats a negative shift count as a shift in the OPPOSITE
+        -- direction (per the manual) - silently wrong instead of erroring,
+        -- e.g. brshift(0x80000000, 33) returned 0x7FFFFFFF instead of the
+        -- correct fully-sign-extended 0xFFFFFFFF. Not currently reachable
+        -- (nothing in this codebase calls brshift with n >= 32, or at all
+        -- outside this shim's own definition), but cheap to make correct
+        -- rather than leave a landmine for whatever calls it first.
+        a = a & BIT_MASK32
+        if n <= 0 then return a end
+        if n >= 32 then
+            return (a & 0x80000000) ~= 0 and BIT_MASK32 or 0
+        end
+        local shifted = (a >> n) & BIT_MASK32
+        if (a & 0x80000000) ~= 0 then
+            shifted = (shifted | ((BIT_MASK32 << (32 - n)) & BIT_MASK32)) & BIT_MASK32
+        end
+        return shifted
+    end,
+}
+
 -- ---- fs: real disk, rooted at the current working directory ----
+
+-- Windows' cmd.exe has no fully reliable way to escape an arbitrary string
+-- inside a quoted argument - a literal '"' breaks straight out of the
+-- quotes, and '%'/'^'/'&'/'|'/'<'/'>' are all interpreted by cmd's OWN
+-- command-line parser before the quoted string ever reaches the target
+-- program, regardless of quoting (the well-known "you cannot robustly
+-- escape a path for cmd.exe" problem). Every path below can originate
+-- remotely - a fleetbridge "delete"/"move"/"readfile"/"writefile"/"list"
+-- command, or the local rm/mv/ls/mkdir shell builtins, which are also
+-- reachable remotely via a relayed `type` command - so building one of
+-- these strings from an unsanitized path is a real command-injection risk,
+-- not just a local-misuse one. Rather than attempt a fragile escaping
+-- scheme, just refuse to shell out at all for a path containing any of
+-- these characters - nothing this shim legitimately needs to touch (an app
+-- name, a config file, a fleet folder) ever needs them.
+local SHELL_DANGEROUS_CHARS = '["&|<>%%%^\r\n]'
+
+local function assertSafeForShell(path)
+    if type(path) == "string" and path:find(SHELL_DANGEROUS_CHARS) then
+        error("path contains a character that can't be safely passed to a shell command: " .. path, 0)
+    end
+    return path
+end
 
 -- pulled out to a local helper (used by both fs.exists and fs.isDir
 -- below) so fs.exists can check it too - real CraftOS's fs.exists returns
@@ -27,7 +93,7 @@ _G.CRAFTOS_EMULATION = true
 -- fixing the root cause here means a NEW caller that (reasonably) assumes
 -- fs.exists alone is enough no longer needs to know that gotcha at all.
 local function isDirOnDisk(path)
-    local winpath = path:gsub("/", "\\")
+    local winpath = assertSafeForShell(path):gsub("/", "\\")
     local pipe = io.popen('if exist "' .. winpath .. '\\" (echo YES) else (echo NO)')
     if not pipe then return false end
     local out = pipe:read("l")
@@ -74,7 +140,7 @@ fs = {
         -- os.remove alone only handles files (and empty dirs) - real
         -- CraftOS's fs.delete removes a non-empty directory recursively too,
         -- so match that here (rd /s /q) rather than silently failing.
-        local winpath = path:gsub("/", "\\")
+        local winpath = assertSafeForShell(path):gsub("/", "\\")
         local pipe = io.popen('if exist "' .. winpath .. '\\" (echo DIR) else (echo FILE)')
         local kind = pipe and pipe:read("l") or "FILE"
         if pipe then pipe:close() end
@@ -100,11 +166,11 @@ fs = {
     move = function(from, to) os.rename(from, to) end,
     combine = function(a, b) return a .. "/" .. b end,
     makeDir = function(path)
-        os.execute(('mkdir "%s" 2>NUL'):format(path:gsub("/", "\\")))
+        os.execute(('mkdir "%s" 2>NUL'):format(assertSafeForShell(path):gsub("/", "\\")))
     end,
     isDir = isDirOnDisk,
     list = function(path)
-        local winpath = path:gsub("/", "\\")
+        local winpath = assertSafeForShell(path):gsub("/", "\\")
         local entries = {}
         local pipe = io.popen('dir /b "' .. winpath .. '" 2>NUL')
         if pipe then
@@ -165,17 +231,36 @@ os.reboot = function()
     print("[shim] os.reboot() called - exiting (re-run run_fleetos.lua to simulate booting back up)")
     os.exit(0)
 end
+-- real CraftOS distinguishes shutdown (stays off until manually turned back
+-- on) from reboot (auto-restarts) - there's no "off" state to persist here
+-- either way, so this is the same exit, just with an honest message instead
+-- of implying it'll come back on its own.
+os.shutdown = function()
+    print("[shim] os.shutdown() called - exiting (this computer is now off; re-run run_fleetos.lua to turn it back on)")
+    os.exit(0)
+end
 
--- Timer scheduling using real wall-clock seconds (os.time(), 1s
--- resolution - stock Lua has no sub-second monotonic clock without
--- extra libraries). Exposed via _G.shim so runtime/run_fleetos.lua's
--- driver loop can find the next timer to wait for.
+local computerLabel = nil
+os.getComputerLabel = function() return computerLabel end
+os.setComputerLabel = function(label) computerLabel = label end
+
+-- Timer scheduling using os.clock() (seconds, sub-second resolution - on
+-- this Windows Lua build it tracks real elapsed wall-clock time, including
+-- time spent blocked in os.execute, not just CPU-busy time - confirmed by
+-- timing a known-length os.execute sleep against it). os.time() was used
+-- here originally, but it's whole-second-only, and pairing it with
+-- math.ceil(delay) meant EVERY sub-1-second delay - including fleetbridge's
+-- entire POLL_INTERVAL_ACTIVE/IDLE tuning (0.1s/0.2s) - silently rounded up
+-- to a full second. That's what actually dominated the measured ~1.2s
+-- report cadence, not the curl.exe subprocess cost the interval comment
+-- used to blame. Exposed via _G.shim so run_sim_node.lua's driver loop can
+-- find the next timer to wait for.
 local timerCounter = 0
-local pendingTimers = {} -- id -> fireAt (os.time() seconds)
+local pendingTimers = {} -- id -> fireAt (os.clock() seconds)
 
 function os.startTimer(delay)
     timerCounter = timerCounter + 1
-    pendingTimers[timerCounter] = os.time() + math.ceil(delay or 0)
+    pendingTimers[timerCounter] = os.clock() + (delay or 0)
     return timerCounter
 end
 
@@ -297,13 +382,220 @@ function write(s) io.write(tostring(s)) end
 -- <node-id>` (interactive) / `fleetctl.py type <node-id> <text>`
 -- (one-shot) - all three go through fleetos.runShellLine() over HTTP,
 -- as a separate OS process/request, and never touch this read() at all.
-function read() return io.read("l") end
+-- replaceChar (real CraftOS's read(replaceChar, ...) first arg) is how
+-- apps/common/shell.lua's PIN prompt and fleetos.lua's terminate-PIN prompt
+-- ask for hidden input - a plain io.read("l") ignored it entirely and
+-- echoed the PIN in cleartext to the console (and to any terminal
+-- scrollback/session log). Windows' console has no line-buffered
+-- "read but don't echo" mode reachable from stock Lua without a C
+-- extension (no compiler is available to build one here - see
+-- craftos_shim.lua's os.startTimer comment for that same constraint hit
+-- elsewhere). PowerShell's Read-Host -AsSecureString does mask input, and
+-- since io.popen(cmd, "r") only redirects the child's STDOUT, its stdin
+-- handle is inherited straight from this process's own console - the
+-- standard trick Windows batch scripts use for password prompts. Only
+-- takes this path when a replaceChar was actually requested; a plain
+-- read() (used for real CraftOS program input, not secrets) is unaffected.
+function read(replaceChar)
+    if replaceChar then
+        local pipe = io.popen('powershell -NoProfile -Command "$s = Read-Host -AsSecureString; ' ..
+            '[Runtime.InteropServices.Marshal]::PtrToStringAuto(' ..
+            '[Runtime.InteropServices.Marshal]::SecureStringToBSTR($s))"', "r")
+        if not pipe then return io.read("l") end
+        local line = pipe:read("l")
+        pipe:close()
+        return line or ""
+    end
+    return io.read("l")
+end
 
 -- ---- shell (CraftOS global program runner, used by fleetos.runShellLine) ----
+-- Previously this just printed a canned "(mocked - no real programs here)"
+-- message for ANY input and did nothing - fleetos.lua's runShellLine (and
+-- apps/common/shell.lua's own REPL) both fall through to shell.run for
+-- anything that isn't a kernel command (list/run/kill/...), so in practice
+-- EVERY real CraftOS program (help, ls, cd, reboot, ...) was a dead end in
+-- this Windows emulation. Below is a small but real implementation of the
+-- handful of built-ins used often enough to matter, plus a generic
+-- "run any .lua file by name" fallback - not a full CraftOS ROM, but no
+-- longer just an inert stub either.
+--
+-- Tracks its own "current directory" (shellDir) independent of the OS
+-- process's real cwd, matching real CraftOS's shell.dir()/shell.setDir() -
+-- lets cd/relative ls/etc. behave the way they do in-game instead of every
+-- path always being relative to the node's root.
+local shellDir = ""
+
+-- Normalizes "." and ".." components (e.g. "cd .." from "foo" must land
+-- back at root, not the literal, never-checked "foo/.." fs.isDir() would
+-- happily accept - the shelled-out Windows `dir`/`if exist` calls
+-- generally tolerate ".." fine, but a normalized path is what pwd should
+-- actually display, and what a later relative resolve() builds on top of).
+local function shellResolve(path)
+    path = path or ""
+    local combined
+    if path:sub(1, 1) == "/" then
+        combined = path:sub(2) -- root-relative, same as real CraftOS's shell.resolve
+    elseif shellDir == "" then
+        combined = path
+    else
+        combined = shellDir .. "/" .. path
+    end
+    local segments = {}
+    for part in combined:gmatch("[^/]+") do
+        if part == "." then
+            -- skip
+        elseif part == ".." then
+            if #segments > 0 then table.remove(segments) end
+        else
+            segments[#segments + 1] = part
+        end
+    end
+    return table.concat(segments, "/")
+end
+
+local BUILTIN_PROGRAMS
+
+BUILTIN_PROGRAMS = {
+    help = function(args)
+        if args[1] then
+            print(BUILTIN_PROGRAMS[args[1]] and ("no separate help text for '" .. args[1] .. "' - just try it")
+                or ("No such program: " .. args[1]))
+            return
+        end
+        local names = {}
+        for name in pairs(BUILTIN_PROGRAMS) do names[#names + 1] = name end
+        table.sort(names)
+        print("Built-in programs: " .. table.concat(names, ", "))
+        print("Anything else is looked up as a .lua file by name in the current directory.")
+    end,
+    ls = function(args)
+        local dir = shellResolve(args[1])
+        if dir ~= "" and not fs.isDir(dir) then print("Not a directory: " .. (args[1] or dir)); return end
+        local entries = fs.list(dir == "" and "." or dir)
+        table.sort(entries)
+        for _, name in ipairs(entries) do
+            local full = dir == "" and name or (dir .. "/" .. name)
+            print(fs.isDir(full) and (name .. "/") or name)
+        end
+    end,
+    cd = function(args)
+        if not args[1] then print("/" .. shellDir); return end
+        local target = shellResolve(args[1])
+        if target ~= "" and not fs.isDir(target) then
+            print("Not a directory: " .. args[1])
+            return
+        end
+        shellDir = target
+    end,
+    pwd = function() print("/" .. shellDir) end,
+    mkdir = function(args)
+        if not args[1] then print("Usage: mkdir <path>"); return end
+        fs.makeDir(shellResolve(args[1]))
+    end,
+    rm = function(args)
+        if not args[1] then print("Usage: rm <path>"); return end
+        local ok, err = pcall(fs.delete, shellResolve(args[1]))
+        if not ok then print("error: " .. tostring(err)) end
+    end,
+    cp = function(args)
+        if not args[1] or not args[2] then print("Usage: cp <from> <to>"); return end
+        fs.copy(shellResolve(args[1]), shellResolve(args[2]))
+    end,
+    mv = function(args)
+        if not args[1] or not args[2] then print("Usage: mv <from> <to>"); return end
+        fs.move(shellResolve(args[1]), shellResolve(args[2]))
+    end,
+    clear = function() term.clear(); term.setCursorPos(1, 1) end,
+    time = function() print(textutils.formatTime(os.time(), true)) end,
+    label = function(args)
+        if args[1] then
+            os.setComputerLabel(args[1])
+            print("label set to " .. args[1])
+        else
+            print(os.getComputerLabel() or "no label set")
+        end
+    end,
+    reboot = function() os.reboot() end,
+    shutdown = function() os.shutdown() end,
+    -- A tiny interactive Lua REPL, same spirit as real CraftOS's `lua`
+    -- program - blocks on io.read() same as apps/common/shell.lua's own
+    -- prompt (see that file's CRAFTOS_EMULATION note on why that's a
+    -- Windows-emulation-only limitation), so this only makes sense typed
+    -- directly at a locally-run shell, not via the dashboard's Terminal.
+    lua = function()
+        print("Interactive Lua - blank line or 'exit' to leave")
+        while true do
+            io.write("lua> ")
+            io.flush()
+            local line = io.read("l")
+            if not line or line == "" or line == "exit" then break end
+            local fn, err = load("return " .. line)
+            if not fn then fn, err = load(line) end
+            if not fn then
+                print("error: " .. tostring(err))
+            else
+                local ok, result = pcall(fn)
+                if not ok then
+                    print("error: " .. tostring(result))
+                elseif result ~= nil then
+                    print(tostring(result))
+                end
+            end
+        end
+    end,
+}
+BUILTIN_PROGRAMS.dir = BUILTIN_PROGRAMS.ls
+BUILTIN_PROGRAMS.delete = BUILTIN_PROGRAMS.rm
+BUILTIN_PROGRAMS.copy = BUILTIN_PROGRAMS.cp
+BUILTIN_PROGRAMS.rename = BUILTIN_PROGRAMS.mv
+BUILTIN_PROGRAMS.cls = BUILTIN_PROGRAMS.clear
+
 shell = {
+    dir = function() return shellDir end,
+    setDir = function(path) shellDir = path or "" end,
+    resolve = shellResolve,
+    -- Real CraftOS's shell.run accepts either one whole "program arg1 arg2"
+    -- string OR separate "program", "arg1", "arg2" varargs - joining
+    -- everything with a space and re-tokenizing handles both the same way
+    -- fleetos.lua's runShellLine (single string) and apps/common/shell.lua's
+    -- REPL (separate words) each already call this.
     run = function(...)
-        print("[shell.run] " .. table.concat({ ... }, " ") .. " (mocked - no real programs here)")
-        return true
+        local parts = {}
+        for w in table.concat({ ... }, " "):gmatch("%S+") do parts[#parts + 1] = w end
+        local name = table.remove(parts, 1)
+        if not name then return false end
+
+        local program = BUILTIN_PROGRAMS[name]
+        if program then
+            local ok, err = pcall(program, parts)
+            if not ok then print("error: " .. tostring(err)) end
+            return ok
+        end
+
+        -- Not a built-in - try running it as an actual .lua file by name,
+        -- resolved against the shell's current directory (real CraftOS's
+        -- shell.run also searches the current dir, not just rom/programs) -
+        -- covers e.g. 'fleetos' or any custom top-level script you've written.
+        -- loadfile (not dofile) so the remaining words can be forwarded as
+        -- real varargs - dofile has no way to pass arguments at all, which
+        -- silently broke any program that reads `...` (e.g. `... .lua x y`
+        -- expecting x/y) with a confusing "value expected" error instead of
+        -- actually receiving them.
+        for _, path in ipairs({ shellResolve(name), shellResolve(name .. ".lua") }) do
+            if fs.exists(path) and not fs.isDir(path) then
+                local fn, loadErr = loadfile(path)
+                if not fn then
+                    print("error: " .. tostring(loadErr))
+                    return false
+                end
+                local ok, err = pcall(fn, table.unpack(parts))
+                if not ok then print("error: " .. tostring(err)) end
+                return ok
+            end
+        end
+        print("No such program: " .. name)
+        return false
     end,
 }
 
@@ -430,12 +722,45 @@ textutils.unserializeJSON = jsonDecode
 -- fleetbridge.lua and install.lua now use for a real per-request timeout).
 -- Each returns a CC:Tweaked-style response handle or (nil, error). ----
 
+-- Unlike fs paths (see assertSafeForShell above), a URL/header value
+-- legitimately contains '%'-escapes and '&' query separators - rejecting
+-- those outright would break ordinary http.get/http.post/deploy-by-url
+-- usage. What's never legitimate, and is also the one character that
+-- actually breaks OUT of this quoting (letting anything after it run as a
+-- separate shell token), is a literal '"' - so that's the one thing this
+-- refuses. cmd.exe's '%VAR%' expansion still happens even inside quotes
+-- (a known cmd.exe quirk with no full fix short of routing curl through a
+-- -K config file instead of a command line at all) - a real but much lower
+-- severity residual risk (substitutes an existing env var's value in, not
+-- arbitrary attacker-chosen text), left as-is here.
 local function shellQuote(s)
+    if s:find('"') then
+        error("value contains a double-quote, which can't be safely passed to a shell command: " .. s, 0)
+    end
     return '"' .. s .. '"'
+end
+
+-- Parses curl's -D header-dump file into a {name = value} table. The file
+-- can contain more than one status-line/headers block (a redirect, a 100
+-- Continue before the real response) - only lines with a ":" are headers
+-- at all, and a later block's value for the same name-insensitive key
+-- simply overwrites an earlier one, which is exactly "keep the final
+-- response's headers" without needing to detect block boundaries.
+local function parseResponseHeaders(headersOutFile)
+    local out = {}
+    local hf = io.open(headersOutFile, "r")
+    if not hf then return out end
+    for line in hf:lines() do
+        local name, value = line:match("^([^:]+):%s*(.-)%s*$")
+        if name then out[name] = value end
+    end
+    hf:close()
+    return out
 end
 
 local function httpRequest(method, url, body, headers, timeout)
     local bodyOutFile = os.tmpname()
+    local headersOutFile = os.tmpname()
     local dataFile
 
     local args = { "-X", method }
@@ -455,11 +780,24 @@ local function httpRequest(method, url, body, headers, timeout)
         f:write(body)
         f:close()
         table.insert(args, "--data-binary")
-        table.insert(args, "@" .. dataFile)
+        -- Bug fix: this used to be "@" .. dataFile, unquoted - unlike
+        -- bodyOutFile/headersOutFile just below, which ARE quoted. os.tmpname()
+        -- resolves under %TEMP%, which is space-free on this dev machine but
+        -- NOT guaranteed elsewhere (any Windows profile path with a space -
+        -- "John Doe", a OneDrive-redirected profile, etc.) - there,
+        -- table.concat(args, " ") would split the temp path into two bogus
+        -- cmd tokens, breaking curl on EVERY POST with a body, i.e. the core
+        -- of fleetbridge.lua's report traffic. shellQuote can be appended
+        -- straight after the unquoted "@" prefix - cmd.exe treats an
+        -- unquoted prefix immediately followed by a quoted segment as one
+        -- argument (same as `dir C:\"Program Files"` works), so curl still
+        -- sees a single "@<path>" argument either way.
+        table.insert(args, "@" .. shellQuote(dataFile))
     end
     table.insert(args, shellQuote(url))
 
-    local cmd = "curl -s -o " .. shellQuote(bodyOutFile) .. ' -w "%{http_code}" ' .. table.concat(args, " ")
+    local cmd = "curl -s -o " .. shellQuote(bodyOutFile) .. " -D " .. shellQuote(headersOutFile)
+        .. ' -w "%{http_code}" ' .. table.concat(args, " ")
     local pipe = io.popen(cmd, "r")
     local code = nil
     if pipe then
@@ -471,7 +809,9 @@ local function httpRequest(method, url, body, headers, timeout)
     local respBody = ""
     local rf = io.open(bodyOutFile, "r")
     if rf then respBody = rf:read("a") or ""; rf:close() end
+    local respHeaders = parseResponseHeaders(headersOutFile)
     os.remove(bodyOutFile)
+    os.remove(headersOutFile)
     if dataFile then os.remove(dataFile) end
 
     if not code or code < 200 or code >= 300 then
@@ -482,6 +822,7 @@ local function httpRequest(method, url, body, headers, timeout)
         readAll = function() return respBody end,
         close = function() end,
         getResponseCode = function() return code end,
+        getResponseHeaders = function() return respHeaders end,
     }
 end
 
