@@ -1,3 +1,4 @@
+-- runtime/craftos_shim.lua
 -- Minimal CraftOS-compatible layer to run fleetos.lua as a real,
 -- persistent process on Windows (no Minecraft). Unlike test/cc_mocks.lua
 -- (which sandboxes everything in memory for one-shot tests), this shim
@@ -428,7 +429,7 @@ local shellDir = ""
 
 -- Normalizes "." and ".." components (e.g. "cd .." from "foo" must land
 -- back at root, not the literal, never-checked "foo/.." fs.isDir() would
--- happily accept - the shelled-out Windows `dir`/`if exist` calls
+-- happily accept - Windows' `dir`/`if exist` shell out under the hood
 -- generally tolerate ".." fine, but a normalized path is what pwd should
 -- actually display, and what a later relative resolve() builds on top of).
 local function shellResolve(path)

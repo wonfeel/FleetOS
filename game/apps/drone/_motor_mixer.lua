@@ -42,6 +42,8 @@ local function clamp(v, lo, hi)
     return v
 end
 
+-- gut-feel numbers, not derived from anything - first real flight will
+-- probably prove all three wrong in one direction or another
 M.DEFAULT_GAINS = {
     attitudeP = 0.6,   -- thrust units per degree of roll/pitch error
     yawP = 0.4,        -- thrust units per unit of yawRate (-1..1)

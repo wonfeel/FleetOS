@@ -88,6 +88,9 @@ end
 -- Maps a redstone-analog channel (0-15) to a signed tilt angle
 -- (-TILT_LIMIT_DEG..+TILT_LIMIT_DEG): 0 = full negative, 15 = full
 -- positive, 7.5 = center/neutral. Matches _drone_config.lua's assumption 2.
+-- TODO: this assumes the tilt actuator responds linearly across the whole
+-- 0-15 range - if it doesn't in practice, this is the one place to add a
+-- curve/deadzone. Not doing that preemptively, no data yet either way.
 local function tiltDegToChannel(deg)
     local frac = (deg + Mixer.TILT_LIMIT_DEG) / (2 * Mixer.TILT_LIMIT_DEG) -- 0..1
     return frac * Mixer.THRUST_MAX
@@ -124,6 +127,9 @@ local function effectiveSetpoint()
     }
 end
 
+-- not merging this into the tick loop below even though it's only called
+-- from one place - keeping it separate made it much easier to test the
+-- mixing math in isolation earlier, leaving it as-is
 local function applyMix(motors)
     for _, motor in ipairs(motors) do
         local ch = dcfg.channels[motor.name]

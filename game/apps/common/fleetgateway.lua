@@ -1,36 +1,25 @@
 -- FleetOS app: opt-in - add "fleetgateway" to config.lua's startup list on
 -- 2-5 trusted computers to turn this on for the fleet.
 --
--- Why this exists: every node's apps/common/fleetbridge.lua normally talks
--- HTTP straight to windows/bridge_server.py, every poll/report cycle (as
--- often as every 0.2s while active) - fine for a small fleet, but the
--- bridge's HTTP load grows O(every node), and there's no failover if the
--- bridge (or the PC it runs on) is briefly unreachable. See
+-- fleetbridge.lua normally talks HTTP straight to bridge_server.py every
+-- poll cycle - fine small-scale, but load grows with every node and
+-- there's no failover if the bridge is briefly unreachable. See
 -- docs/ARCHITECTURE_GATEWAY_CLUSTER.html for the full design.
 --
--- The gateway nodes elect exactly ONE leader (Bully algorithm - static
--- priority = computer id, lowest wins) via signed rednet heartbeats. ONLY
--- the leader actually opens an HTTP connection to bridge_server.py; every
--- other gateway just runs the election loop. A regular node whose
--- fleetbridge.lua has opted into the gateway-relay path (see that file's
--- own comment) broadcasts its poll/report over rednet instead of HTTP;
--- whichever gateway is CURRENTLY leader answers, relaying the exact same
--- HTTP calls to the bridge a direct-HTTP node would have made itself - the
--- bridge can't tell the difference, and needs no changes of its own.
+-- Gateways elect one leader (Bully algorithm, lowest computer id wins) via
+-- signed heartbeats; only the leader opens an HTTP connection to the
+-- bridge. A regular node opted into the relay path broadcasts poll/report
+-- over rednet instead, and whichever gateway is currently leader answers -
+-- the bridge can't tell the difference. Zero gateways running = every node
+-- falls back to talking straight to the bridge, unaffected.
 --
--- A fleet with fleetgateway.lua running on zero nodes is completely
--- unaffected - every regular node still falls back to talking straight to
--- the bridge, exactly as before this existed.
---
--- SECURITY: gatewaySecret (config.lua) MUST be a real shared secret for
--- this to be safe - see apps/common/_signed_rednet.lua's header for
--- exactly what signing does/doesn't protect against. This matters MORE
--- here than for raytower's use of the same module: with an ender modem in
--- play (unlimited range, even cross-dimension), there is no physical-
--- proximity protection at all - anyone anywhere with an ender modem could
--- otherwise forge a heartbeat and hijack leader status, or inject fake
--- poll/report traffic for a node they don't own, with zero need to ever
--- get near this computer.
+-- SECURITY: gatewaySecret (config.lua) MUST be a real shared secret - see
+-- _signed_rednet.lua's header for what signing does/doesn't protect
+-- against. Matters MORE here than for raytower's use of the same module:
+-- an ender modem has unlimited range (even cross-dimension), so there's no
+-- physical-proximity protection at all - anyone anywhere with one could
+-- forge a heartbeat and hijack leader status, or inject fake poll/report
+-- traffic for a node they don't own.
 
 local SignedRednet = dofile("apps/common/_signed_rednet.lua")
 

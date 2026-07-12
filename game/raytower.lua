@@ -1,6 +1,5 @@
--- raytower.lua
 -- Everything in one file: triangulation math, master logic, slave logic.
--- The same file is uploaded to ALL computers (master and every tower),
+-- The same file is uploaded to ALL computers (master and every tower) -
 -- the role is chosen by the first argument at launch.
 --
 -- Usage:

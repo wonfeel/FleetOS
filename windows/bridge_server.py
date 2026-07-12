@@ -547,25 +547,17 @@ BROADCAST_LOG_TTL_SECONDS = 5 * 60        # how long a "*" command stays eligibl
                                            # a node that hadn't registered yet when it was sent
 
 # Bug fix: LOG_PATH used to be a fixed "bridge.log" regardless of port, so
-# two bridge_server.py instances (e.g. one left running in the background
-# via run_bridge_background.bat on one port, another started later on a
-# different port for testing) both fought over the SAME log file - the
-# second one's RotatingFileHandler couldn't rename bridge.log -> bridge.log.1
-# once it hit its size cap because the first process still had it open
-# (Windows won't let you rename a file that's open elsewhere, unlike POSIX),
-# spamming "--- Logging error ---"/PermissionError on every rotation attempt
-# forever after (harmless to the server itself - it keeps running either
-# way - but very noisy). Naming the file after the port a process actually
-# binds to means two DIFFERENT ports never contend for the same file; the
-# default port (8787) keeps the original plain "bridge.log" name so existing
-# setups/scripts pointing at it aren't affected.
+# two instances (one in the background, one started later for testing)
+# fought over the same file - the second's RotatingFileHandler couldn't
+# rename it once it hit the size cap because the first still had it open
+# (Windows won't let you rename an open file, unlike POSIX), spamming
+# PermissionError on every rotation attempt after (harmless, just noisy).
+# Naming the file after the actual bound port fixes that; port 8787 keeps
+# the plain "bridge.log" name so existing setups aren't affected.
 #
-# Note: this only fixes the LOG file. bridge_state.json/node_meta.json are
-# still shared across every bridge_server.py instance in this same windows/
-# directory regardless of port - fine for the normal case (one fleet, one
-# port), but running two instances against the same directory for two
-# unrelated fleets/ports would still have them silently share that state.
-# Copy windows/ to a second directory if you need fully isolated instances.
+# Only fixes the LOG file, though - bridge_state.json/node_meta.json are
+# still shared across every instance in this directory regardless of port.
+# Copy windows/ to a second directory for fully isolated instances.
 try:
     # Guarded, not a bare int(sys.argv[1]): this line runs at IMPORT time (it
     # has to, to name the log file before the logger below is even set up),
@@ -1167,32 +1159,19 @@ class Handler(BaseHTTPRequestHandler):
         # Required on every state-changing route regardless of FLEET_BRIDGE_KEY
         # (see CSRF_HEADER above).
         #
-        # HONEST SCOPE NOTE: this header is NOT a secret and does NOT stop a
-        # determined attacker's own JavaScript. _cors_headers() explicitly
-        # allows CSRF_HEADER in Access-Control-Allow-Headers with a wildcard
-        # Origin, so a malicious page's own fetch() CAN pass the CORS
-        # preflight and set this header - "our preflight doesn't check
-        # Origin" makes this MORE permissive, not less. All this actually
-        # stops is a "dumb" CSRF vector that can't set custom headers at all
-        # (a plain <form> POST, an <img>/<script> GET) - it does nothing
-        # against a page that specifically knows to add this one header,
-        # which is trivial to find by reading this file (public source).
+        # HONEST SCOPE NOTE: not a secret, doesn't stop a determined
+        # attacker's own JS - _cors_headers() allows this header with a
+        # wildcard Origin, so a malicious page's fetch() can set it too.
+        # All it actually blocks is a "dumb" CSRF vector with no custom
+        # headers at all (a plain <form> POST, an <img>/<script> GET).
         #
-        # When FLEET_BRIDGE_KEY is set (mandatory for any non-127.0.0.1
-        # bind - see main()), _check_auth's X-API-Key check already ran
-        # before this and is the REAL defense: a cross-origin page cannot
-        # read the key out of the legitimate dashboard's localStorage
-        # (Same-Origin Policy), so it cannot forge a valid request
-        # regardless of what this check does. This header only matters on
-        # its own when no key is configured at all (127.0.0.1-only,
-        # no-auth-needed default) - in that mode it's real but weak
-        # protection against a malicious website the browser also happens
-        # to have open, not a meaningful barrier against one that's
-        # specifically targeting this bridge.
-        #
-        # Doesn't protect against a non-browser client (curl, fleetctl.py)
-        # either way - those were never the threat model here, they
-        # already require you to have chosen to run them.
+        # When FLEET_BRIDGE_KEY is set, _check_auth's X-API-Key check
+        # already ran and is the REAL defense (Same-Origin Policy keeps a
+        # cross-origin page from reading the key out of localStorage). This
+        # header only matters alone in the no-key 127.0.0.1 default, where
+        # it's weak protection against another open tab, not a targeted one.
+        # Doesn't cover non-browser clients (curl, fleetctl.py) either way -
+        # never the threat model, those already require choosing to run them.
         if self.headers.get(CSRF_HEADER):
             return True
         self._send_json({"error": "missing " + CSRF_HEADER + " header"}, status=403)
@@ -2341,28 +2320,18 @@ def main():
 
     server = Server((host, port), Handler)
 
-    # Optional TLS: off by default (plain HTTP, fine for a trusted LAN/
-    # localhost), on if both env vars point to a cert+key pair (e.g. a
-    # self-signed one - `openssl req -x509 -newkey rsa:2048 -nodes -keyout
-    # key.pem -out cert.pem -days 365`). Once enabled, every node's
-    # config.lua bridgeUrl and dashboard.html's bridge address need to say
-    # https:// instead of http://.
+    # Optional TLS: off by default, on if both env vars point to a cert+key
+    # pair (e.g. self-signed via `openssl req -x509 -newkey rsa:2048 -nodes
+    # -keyout key.pem -out cert.pem -days 365`). Enabling it means every
+    # node's bridgeUrl/dashboard address needs https:// instead of http://.
     #
-    # Deliberately still OPT-IN, not required, even when host != 127.0.0.1 -
-    # Radmin VPN (this project's own documented, first-class way to reach a
-    # bridge beyond localhost - see start_bridge_mc.bat/docs/fleetos_guide.
-    # html) already encrypts the whole tunnel itself, so forcing a second,
-    # app-level TLS layer on top would just be cert-generation friction for
-    # no real security gain in that specific, common case. This can't tell
-    # "bound to a VPN's virtual interface" apart from "bound to a real
-    # public/port-forwarded interface" from here (both are just some
-    # non-127.0.0.1 IP) - so instead of guessing, warn loudly and let the
-    # operator judge their own network. Trying to build no-dependency
-    # (`Stdlib only, no pip install needed` - see this file's own header)
-    # auto-cert-generation isn't realistic either: Python's stdlib ssl
-    # module can only USE a cert, not create one, and shelling out to
-    # openssl.exe (like other best-effort helpers in this file) can't be
-    # assumed present on a stock Windows install the way curl.exe can.
+    # Still opt-in even off 127.0.0.1 - Radmin VPN (this project's
+    # documented way to reach a bridge remotely) already encrypts the
+    # tunnel, so forcing app-level TLS on top of that is just cert friction
+    # for no gain. Can't tell "VPN interface" from "port-forwarded public
+    # interface" from here either way, so: warn loudly, let the operator
+    # judge their own network. No auto-cert-generation either - stdlib ssl
+    # can only USE a cert, not create one, and this file stays dependency-free.
     tls_cert = os.environ.get("FLEET_TLS_CERT")
     tls_key = os.environ.get("FLEET_TLS_KEY")
     scheme = "http"

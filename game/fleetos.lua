@@ -42,25 +42,19 @@ local APPS_DIR = "apps"
 local APP_GROUPS = { "common", "raytower" }
 
 -- ============================================================
--- Output capture - every print()/write() from ANY task (they all share
--- this computer's global environment) is mirrored into a rolling buffer,
--- so a remote terminal (apps/fleetbridge.lua) or the monitor mirror below
--- can show what's actually happening on this computer's screen without
--- being physically in front of it. Colors are captured too (whatever
--- term.setTextColor was last set to), kept in a PARALLEL structure so
--- getOutput()'s plain strings (used by fleetbridge.lua/the dashboard,
--- which don't care about color) stay unchanged.
+-- Output capture - every print()/write() from ANY task is mirrored into a
+-- rolling buffer, so a remote terminal (fleetbridge.lua) or the monitor
+-- mirror can show this screen without being physically in front of it.
+-- Colors captured in a PARALLEL structure so getOutput()'s plain strings
+-- (fleetbridge.lua/dashboard, which don't care about color) stay unchanged.
 -- ============================================================
 
 local OUTPUT = {}         -- plain strings, one per completed line
 local COLORED = {}        -- parallel: each entry is { {text=,color=}, ... } segments for that line
 local MAX_OUTPUT_LINES = 500
--- Total number of completed lines ever flushed, monotonic (never reset,
--- never decreases even as old OUTPUT entries get trimmed from the front
--- below) - lets getOutputSince() answer "what's new since cursor X" without
--- OUTPUT's own trimming making array indices an unstable cursor to hand
--- back to a caller across calls. See getOutputSince()'s own comment for how
--- it's used.
+-- Total lines ever flushed, monotonic - never reset/decreased even as
+-- OUTPUT gets trimmed from the front, so getOutputSince(cursor) has a
+-- stable handle that doesn't drift as array indices shift.
 local outputSeq = 0
 local currentLine = ""       -- accumulates text between newlines, e.g. printStatus()
 local currentColors = {}     -- currentColors[i] = color of currentLine's i-th character,
@@ -176,23 +170,14 @@ local function tailWithCurrent(all, current, isEmpty, n)
     return out
 end
 
--- Delta view for a low-bandwidth caller (apps/common/fleetbridge.lua's
--- report()) that would otherwise resend the same ~150 lines every single
--- cycle via getOutput() above. `cursor` is whatever outputSeq value a
--- previous call returned (0 the first time). Returns:
---   newLines  - only the COMPLETE lines flushed since cursor (never
---               includes the in-progress line - see `tail` below for that)
---   newCursor - pass this back in next time
---   tail      - the current in-progress line's text RIGHT NOW (e.g. a
---               "shell> " prompt still waiting on Enter), always returned
---               fresh since it can change without ever flushing a new
---               line - a caller that only appended newLines and ignored
---               this would never show a live-but-not-yet-terminated line
---               until it finally completes.
--- If cursor is older than the oldest line still held (this node went a
--- very long time between calls, past MAX_OUTPUT_LINES worth of output),
--- there's no way to recover what was trimmed - falls back to returning
--- everything currently held, same as getOutput() would.
+-- Delta view for a low-bandwidth caller (fleetbridge.lua's report()) that
+-- would otherwise resend the same ~150 lines every cycle. `cursor` is a
+-- previously-returned outputSeq (0 first time). Returns newLines (complete
+-- lines since cursor), newCursor, and tail (the in-progress line right
+-- now, e.g. a "shell> " prompt still waiting on Enter - returned fresh
+-- every call since it changes without ever flushing a completed line).
+-- Cursor older than the oldest line still held -> falls back to returning
+-- everything, same as getOutput().
 local function getOutputSince(cursor)
     cursor = cursor or 0
     local oldestKeptSeq = outputSeq - #OUTPUT + 1
@@ -209,17 +194,12 @@ local function getOutputSince(cursor)
     return newLines, outputSeq, currentLine
 end
 
--- Real CraftOS's bios print()/write() are plain Lua functions that
--- internally call the GLOBAL write()/term.write() to do the actual
--- drawing - which by the time realPrint/realWrite below run, ARE these
--- very hooks (already reassigned). Without a guard, calling realPrint(...)
--- would recurse back into our own write()/term.write() hooks for the same
--- text, capturing every line twice (this doesn't show up under
--- test/cc_mocks.lua or windows/craftos_shim.lua, since those don't wire
--- print/write/term.write together - only real CraftOS does). `capturing`
--- stays true for the whole nested call, so only the outermost hook that
--- set it actually appends - inner ones still call through to the real
--- renderer, they just skip re-capturing what's already captured.
+-- Real CraftOS's print()/write() call the GLOBAL write()/term.write() to
+-- draw - which by the time realPrint/realWrite run below, ARE these hooks
+-- (already reassigned). Without a guard, realPrint(...) would recurse back
+-- into our own hooks, capturing every line twice (doesn't show up under
+-- the mocks/shim, only real CraftOS). `capturing` stays true for the whole
+-- nested call so only the outermost hook actually appends.
 local capturing = false
 
 _G.print = function(...)
@@ -805,19 +785,16 @@ end
 local INSTR_BUDGET = 20000000
 local hasDebugHook = type(debug) == "table" and type(debug.sethook) == "function"
 
--- Bug fix: found live, in a real game session - the watchdog was also being
--- armed on the kernel's OWN internal tasks (_monitor_mirror, _supervisor -
--- anything with a leading underscore, same naming convention used
--- elsewhere for "kernel-owned, not a spawned app"), and _monitor_mirror was
--- observed dying silently on its very first tick on a real CC:Tweaked
--- server (blank monitor, missing from fleetos.list() entirely) - most
--- likely debug.sethook's count-hook semantics on CC:Tweaked's Cobalt VM
--- don't exactly match a redraw loop's real Lua-instruction cost the way
--- they do under desktop Lua (where this was tested and never reproduced).
--- The watchdog's actual purpose is protecting the kernel from a BUGGY
--- THIRD-PARTY APP hanging everything else - it was never meant to police
--- kernel-authored code we already trust, so kernel tasks are now exempt
--- from it entirely rather than trying to guess the right budget for them.
+-- Found live in a real game session: the watchdog was also arming on the
+-- kernel's OWN internal tasks (_monitor_mirror, _supervisor - leading
+-- underscore, same convention as "kernel-owned, not a spawned app"
+-- elsewhere), and _monitor_mirror died silently on its very first tick on
+-- a real server (blank monitor, gone from fleetos.list()) - debug.sethook's
+-- count-hook semantics on Cobalt evidently don't match a redraw loop's
+-- real instruction cost the way they did under desktop Lua, where this was
+-- tested and never reproduced. The watchdog exists to catch a buggy THIRD-
+-- PARTY app, not to police kernel code we already trust - kernel tasks are
+-- exempt entirely now instead of guessing the right budget for them.
 local function isKernelTaskName(name)
     return name:sub(1, 1) == "_"
 end

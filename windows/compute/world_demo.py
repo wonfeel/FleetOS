@@ -1,15 +1,8 @@
 """
 world_demo.py - minimal example of a "world access" compute script (see
-_fleetos_world.py).
-Only does anything interesting if the calling Lua app passed ?node=<id> to
-POST /compute/world_demo - without that, world.* calls raise WorldError,
-which this catches and reports back as {"ok": false, "error": ...} so it's
-still safe to test-run from the dashboard's "Compute scripts" section (no
-node context there either).
-
-Prints a greeting on the node's own terminal/monitor, then reports its GPS
-position and attached peripherals - reads one JSON object from stdin
-(ignored - this demo takes no input), prints one JSON object to stdout.
+_fleetos_world.py). No ?node=<id> on the request -> world.* raises
+WorldError, caught and reported as {"ok": false, ...} - still safe to
+test-run from the dashboard with no real node behind it.
 """
 
 import json

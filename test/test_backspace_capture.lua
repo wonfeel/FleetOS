@@ -1,20 +1,9 @@
--- Reproduces the reported bug: "when I erase text, the text on the
--- console doesn't get erased" - i.e. the monitor mirror / dashboard
--- Terminal panel (both driven by fleetos.getOutput()/getColoredOutput())
--- kept showing leftover garbage after backspacing, even though the real
--- in-game screen was fine.
---
--- Root cause: real CraftOS's read() edits the input line IN PLACE -
--- backspacing does term.setCursorPos(back to start of input) then
--- term.write(a shorter string + a trailing blank to erase the old last
--- character), it never prints a fresh line. The old capture code only
--- ever appended text to currentLine, so a backspace redraw just piled
--- more text onto the end of the buffer instead of overwriting.
---
--- test/cc_mocks.lua's term table has no getCursorPos, so fleetos.lua
--- falls back to a constant (1, 1) - fine for this test, since we just
--- keep every setCursorPos call on "row 1" to match, exactly like a real
--- single-line shell prompt would.
+-- Reproduces the reported bug: backspacing left garbage in the monitor
+-- mirror / dashboard Terminal, even though the real in-game screen was
+-- fine. Root cause: CraftOS's read() edits the input line in place
+-- (setCursorPos back + a shorter term.write), never prints a fresh line -
+-- the old capture code only ever appended, so a backspace redraw piled
+-- onto the end instead of overwriting.
 --
 -- Run with (cwd must be game/):
 --   cd game

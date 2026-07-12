@@ -1,160 +1,64 @@
--- Bridges THIS computer to your real Windows PC over HTTP. Run it on
--- every computer in the fleet - there's no master/slave split, every node
--- polls and executes commands for itself, identified by config.lua's
--- `id`. No modem/rednet is REQUIRED - by default each node talks to your
--- PC directly. If a modem is present AND this fleet is running
--- apps/common/fleetgateway.lua somewhere, poll/report can instead relay
--- through a gateway over rednet - see the "Gateway-relay opt-in path"
--- section further down for the full contract; a node with no modem, or a
--- fleet with no gateways deployed, is completely unaffected.
+-- Bridges THIS computer to your real Windows PC over HTTP. Run on every
+-- computer in the fleet - no master/slave, each node polls/executes for
+-- itself (config.lua's `id`). No modem required by default; if one's
+-- present and apps/common/fleetgateway.lua is running somewhere, poll/
+-- report can relay through a gateway over rednet instead (see the
+-- "Gateway-relay opt-in path" section below) - nodes with no modem, or a
+-- fleet with no gateways, are unaffected.
 --
--- CraftOS computers can only make OUTGOING http requests, so this app
--- polls a small local server on your PC (windows/bridge_server.py) for
--- commands addressed to this node's id (or to "*" for everyone),
--- executes them locally, and posts a status report back after every
--- poll. Command types:
---   run / kill    - fleetos.spawn/kill an app on THIS computer
---   deploy        - writes new app code (from `code` or fetched from
---                   `url`) to THIS computer, backing up the old version
---                   as <app>.lua.bak, restarting it if it was running
---   rollback      - restores <app>.lua.bak
---   type          - runs a line of text on THIS computer as if typed at
---                   its real shell prompt (shell.run) - remote terminal
---   readfile      - reads a file from THIS computer's disk
---   writefile     - writes a file to THIS computer's disk (creates it if
---                   missing - also how the dashboard's Explorer makes a
---                   brand new empty file)
---   list          - lists one directory's entries (name/isDir/size) on
---                   THIS computer - powers the dashboard's Explorer. `path`
---                   omitted or "" means the root
---   mkdir         - creates a directory on THIS computer
---   delete        - deletes a file OR directory (recursively - same as
---                   CraftOS's own `fs.delete`) on THIS computer
---   move          - renames/moves a file or directory (`from`/`to`,
---                   fs.move) - dashboard Explorer's rename UI. NOT the
---                   same thing as the "rename" command below (that
---                   renames the node's own id, not a file)
---   update        - re-fetches fleetos.lua itself from this same bridge
---                   and reboots to apply it (fleetos.lua isn't an "app",
---                   so plain "deploy" can't touch it). Backs up the
---                   previously-running fleetos.lua as fleetos.lua.bak first.
---   rollback_kernel - restores fleetos.lua.bak (undoes the last
---                   "update") and reboots, same idea as "rollback" above
---                   but for the kernel itself instead of an app.
---   rename        - changes THIS computer's node id (cmd.newId), then
---                   reboots so every part of fleetos/fleetbridge picks up
---                   the new id cleanly. Doesn't touch config.lua (which
---                   may have comments/formatting worth keeping) - writes
---                   a small node_id.txt override instead, which always
---                   wins over config.lua's `id` field if present.
---   world_call    - executes one real Lua "world" action (cmd.action) on
---                   THIS computer and returns its result - print/
---                   gps_locate/peripheral_call/list_peripherals. Not
---                   issued by the dashboard - queued by bridge_server.py's
---                   POST /world_call on behalf of a windows/compute/<name>.py
---                   script that imported _fleetos_world (see that file) -
---                   lets Python act like a real Lua program instead of a
---                   pure stdin/stdout function.
---   monitor_touch - simulates a real tap at character column/row (cmd.x,
---                   cmd.y) on THIS computer's attached monitor, via
---                   fleetos.touchMonitor() - lets the dashboard's monitor
---                   emulation actually be clicked, not just viewed.
---   force_release_monitor - un-claims the monitor regardless of which
---                   app holds it, without killing that app - for a remote
---                   "the screen is stuck" fix when a terminal isn't handy.
---   drone_set     - flight setpoint (cmd.throttle/yawRate/moveX/moveY) for
---                   apps/drone/drone_control.lua, delivered via
---                   fleetos.publish("drone_set", ...) - a no-op if that
---                   app isn't running on this node. See its own header for
---                   the full control scheme; this is just the transport.
---   configure     - bulk fleet config: push a new bridgeUrl/apiKey
---                   and/or startup app list to this node - see
---                   fleetos.setBridge/setStartup.
+-- CraftOS can only make OUTGOING http requests, so this polls
+-- windows/bridge_server.py for commands addressed to this node's id (or
+-- "*"), executes them locally, posts a status report back. Command types:
+--   run / kill      - fleetos.spawn/kill an app here
+--   deploy/rollback - write new app code (backs up as <app>.lua.bak first) / restore that backup
+--   type            - runs a line as if typed at the real shell prompt - remote terminal
+--   readfile/writefile/list/mkdir/delete/move - Explorer's file ops on this computer's disk
+--   update/rollback_kernel - re-fetch+reboot fleetos.lua itself (not an app, "deploy" can't touch it) / undo that
+--   rename          - changes this node's id + reboots (writes node_id.txt, doesn't touch config.lua)
+--   world_call      - runs one real Lua action (print/gps_locate/peripheral_call/...) for a
+--                      windows/compute/<name>.py script via _fleetos_world - not dashboard-issued
+--   monitor_touch / force_release_monitor - simulate a tap on the monitor / un-stick it remotely
+--   drone_set       - flight setpoint for apps/drone/drone_control.lua (see its own header)
+--   configure       - bulk-push bridgeUrl/apiKey/startup list to this node
 --
--- The shell command `bridge <url> [key]` (apps/common/shell.lua) changes
--- BASE_URL/API_KEY the same way - writes bridge_override.txt, then restarts
--- just this app (no reboot needed, unlike rename - the node's identity
--- isn't changing). `bridge` with no args shows what's currently active;
--- `bridge clear` removes the override. windows/run_fleetos.lua and
--- run_sim_node.lua accept the same url/key as command-line arguments and
--- write the same file before first boot, for a one-line emulation start.
--- Every report also includes this computer's recent print()/write()
--- output (fleetos.getOutput()), so the website can show a live terminal
--- for ANY node you pick, not just one designated master. Also includes
--- `pos` (last known {x,y,z} via gps.locate(), or nil if no GPS host
--- constellation answers) for the dashboard's Position column/map.
+-- Every report includes recent print()/write() output (any node's a live
+-- terminal, not just one master) and `pos` (gps.locate(), nil if no host
+-- constellation answers).
 --
--- IMPORTANT: CC:Tweaked blocks http requests to localhost/LAN addresses
--- by default. You must allow BASE_URL's host in your world/server's
--- computercraft-server.toml under [http.rules] - see windows/README.md.
+-- IMPORTANT: CC:Tweaked blocks http to localhost/LAN by default - allow
+-- BASE_URL's host in computercraft-server.toml's [http.rules].
 --
--- Authentication is OPT-IN - bridge_server.py has no login of its own
--- unless you set FLEET_BRIDGE_KEY before starting it, in which case every
--- request needs a matching X-API-Key header (see API_KEY below). Without
--- that, whoever can reach BASE_URL can run code and read/write files on
--- this computer through you. Keep it behind something you trust
--- (127.0.0.1, or a VPN like Radmin that only your own peers can join) -
--- don't port-forward it to the open internet without also setting a key.
+-- Auth is OPT-IN: no FLEET_BRIDGE_KEY set on the bridge = no login at all,
+-- meaning anyone who can reach BASE_URL can run code and read/write files
+-- here through you - keep it behind something you trust.
 --
--- BASE_URL is resolved in this order:
---   1. bridge_override.txt (see the `bridge` shell command above) - the
---      most recent explicit choice, wins over everything else
---   2. FLEET_BRIDGE_URL env var (only set by windows/run_fleetos.lua's
---      command-line-argument handling - real CC:Tweaked computers have no
---      os.getenv, so this is always skipped in-game)
---   3. config.lua's bridgeUrl field (the normal way to set this for a
---      real deployed computer, e.g. "http://<your-radmin-ip>:8787")
---   4. http://127.0.0.1:8787 as a last-resort default
+-- BASE_URL/API_KEY resolve in the same order: bridge_override.txt (see
+-- shell's `bridge <url> [key]` command) > FLEET_BRIDGE_URL/KEY env var
+-- (run_fleetos.lua's CLI args only, never set in-game) > config.lua >
+-- http://127.0.0.1:8787 with no key as the last-resort default.
 --
--- API_KEY (only needed if bridge_server.py was started with
--- FLEET_BRIDGE_KEY) is resolved the same way: bridge_override.txt, then
--- FLEET_BRIDGE_KEY env var, then config.lua's apiKey field, else blank (no
--- auth sent/expected).
---
--- Every http call goes through httpGet/httpPost (see HTTP_TIMEOUT below),
--- which time out rather than blocking forever if the bridge never
--- responds. readfile/writefile reject any path containing ".." up front
--- (fs already sandboxes to this computer's root regardless, but this gives
--- a clear error instead of relying on that silently).
+-- httpGet/httpPost (HTTP_TIMEOUT below) never block forever if the bridge
+-- is unreachable. readfile/writefile reject any ".." path up front for a
+-- clear error, even though fs already sandboxes to this computer's root.
 
--- protocol version - reported on every /report so bridge_server.py (or
--- any future alternative bridge implementation) can tell which wire shape a
--- node speaks, instead of just guessing from whichever optional fields
--- happen to be present. Bump this if a /report or /poll response field is
--- ever added/removed/repurposed in a way an older node or bridge couldn't
--- just ignore safely.
--- v2: report() now OMITS apps/appVersions/pos/effectiveConfig/monitor
--- entirely when unchanged since the last successfully-delivered report
--- (was: always sent in full every cycle), and output is a delta
--- (getOutputSince) plus a separate always-present outputTail, not the last
--- 150 lines every time. This is NOT safe against an old (pre-diet)
--- bridge_server.py, which did `node["latest_report"] = body` - a
--- wholesale replace that would silently wipe any field this node omits.
--- A v2-or-later bridge merges instead (keeps the previous value for an
--- omitted key) - see windows/bridge_server.py's /report handler.
+-- Reported on every /report so bridge_server.py knows which wire shape a
+-- node speaks instead of guessing from which optional fields are present.
+-- Bump on any breaking /report or /poll field change.
+-- v2: report() omits unchanged fields (apps/appVersions/pos/
+-- effectiveConfig/monitor) instead of resending them every cycle, and
+-- output is a delta + outputTail instead of the last 150 lines each time -
+-- an OLD bridge_server.py did `node["latest_report"] = body` (wholesale
+-- replace), which would silently wipe any field a v2 node omits. A v2+
+-- bridge merges instead - see windows/bridge_server.py's /report handler.
 local PROTOCOL_VERSION = 2
 
--- adaptive poll interval - a fleet of many nodes each hitting the
--- bridge adds up linearly (50 nodes = 50 req/s minimum, even when the
--- fleet is completely idle). Stay fast right after real activity (a
--- command was just queued for this node - an admin is actively working),
--- fall back to a slower cadence once things go quiet, mirroring the
--- dashboard's own scheduleNextPoll adaptive-polling pattern. IDLE itself
--- (cfg.pollIntervalIdle default, set further below once cfg exists) was
--- 2.0s before the report payload-diet and the optional gateway-relay path
--- both existed, then 0.5s - each individual request AND the bridge's
--- total request count are cheap enough now that a shorter default is
--- still safe. Note for anyone tuning this further in the Windows emulation
--- specifically: this constant used to have no effect below ~1s at all
--- (measured ~1.2s at the old 0.5s IDLE default, same as at 0.2s) - not a
--- curl.exe subprocess cost (measured separately at ~50-90ms/call, not the
--- bottleneck), but a bug in windows/craftos_shim.lua's os.startTimer,
--- which computed fireAt from os.time() (whole seconds) + math.ceil(delay),
--- silently flooring every sub-1-second sleep up to a full second. Fixed
--- there (and in windows/run_sim_node.lua / run_fleetos.lua's driver loops,
--- which also had a ~1s-floor `ping -n N` sleep for the same reason) - this
--- constant now actually controls the real cadence in the Windows emulation
--- too, not just in real CC:Tweaked.
+-- Adaptive poll interval: a fleet of N idle nodes still costs N req/s at a
+-- fixed rate, so stay fast only right after real activity (a command was
+-- just queued - someone's actively working) and back off once quiet, same
+-- idea as the dashboard's own scheduleNextPoll. (If tuning this in the
+-- Windows emulation: craftos_shim.lua's os.startTimer used to floor every
+-- sub-1s sleep to a full second - fixed, this constant now actually
+-- controls real cadence there too, not just in-game.)
 local POLL_INTERVAL_ACTIVE = 0.1
 local ACTIVE_WINDOW_SECONDS = 15 -- how long "recently got a command" still counts as active
 local POLL_INTERVAL = POLL_INTERVAL_ACTIVE -- kept as the base unit for POS_REFRESH_EVERY/HEARTBEAT_EVERY below
@@ -246,15 +150,11 @@ end
 
 local HTTP_TIMEOUT = 8 -- seconds
 
--- http.get/http.post block internally until the request resolves, with no
--- per-call timeout of their own - if the bridge process is killed mid
--- request (or a "deploy" url just hangs), this computer would otherwise
--- wait forever. http.request is the async form: it fires an http_success/
--- http_failure event when done, so this races that against a manual timer
--- via os.pullEvent - the same "wait for one specific event, ignore the
--- rest" idiom used elsewhere (e.g. os.sleep). Also passes `timeout` in the
--- options table, which recent CC:Tweaked versions honor natively too -
--- belt and suspenders, harmless if an older version just ignores the field.
+-- http.get/http.post block with no timeout of their own - a killed bridge
+-- process or a hung "deploy" url would wait forever. http.request is the
+-- async form (fires http_success/http_failure), raced here against a
+-- manual timer. Also passes `timeout` in the options table for CC:Tweaked
+-- versions that honor it natively - harmless if an older one ignores it.
 local function httpRequest(url, body, headers)
     http.request({ url = url, body = body, headers = headers, timeout = HTTP_TIMEOUT })
     local timerId = os.startTimer(HTTP_TIMEOUT)
@@ -281,18 +181,12 @@ local function httpPost(url, body, headers) return httpRequest(url, body, header
 -- reached once THIS coroutine gets its first resume) isn't early enough.
 
 -- ============================================================
--- Gateway-relay opt-in path - see apps/common/fleetgateway.lua's header
--- for the full design/rationale. Short version: if a modem is present AND
--- this node has actually heard a signed heartbeat from a gateway
--- recently, poll()/report() below try relaying over rednet FIRST, falling
--- back to the direct-HTTP calls above unchanged if that doesn't produce a
--- result quickly. A node with no modem, or one that's never heard a
--- gateway heartbeat (including every node in a fleet that isn't running
--- fleetgateway.lua anywhere), never attempts this at all - poll()/
--- report() behave EXACTLY as they did before this existed, at no extra
--- cost (not even an extra rednet call - gatewayModem is nil, so
--- pollForGatewayHeartbeat/gatewayIsLikelyAvailable short-circuit
--- immediately).
+-- Gateway-relay opt-in path - see fleetgateway.lua's header for the full
+-- design. Short version: with a modem present and a recent signed
+-- heartbeat heard, poll()/report() try relaying over rednet first, falling
+-- back to direct HTTP if that doesn't land quickly. No modem, or no
+-- heartbeat ever heard (any fleet not running fleetgateway.lua) - zero
+-- extra cost, behaves exactly as before this existed.
 -- ============================================================
 
 local SignedRednet = dofile("apps/common/_signed_rednet.lua")
@@ -374,17 +268,12 @@ local function reportViaGateway(bodyJSON)
     end
 end
 
--- "update"/"rename" both reboot right after sending a one-off ack (the
--- normal end-of-cycle report() never runs for them, since os.reboot() cuts
--- the loop short) - if that ack POST itself is lost (one bad network blip
--- at exactly the wrong moment), the bridge never learns the command
--- finished. For "rename" specifically this is worse than just a missing
--- status: bridge_server.py only migrates a node's dashboard folder
--- assignment from the OLD id to the NEW one when it sees this exact ack -
--- losing it silently orphans that folder assignment forever, since the old
--- id never reports again. A few quick retries make that far less likely
--- without meaningfully delaying the reboot on the common case (first
--- attempt succeeds).
+-- "update"/"rename" reboot right after a one-off ack (os.reboot() cuts the
+-- loop short before the normal report() runs) - lose that ack and the
+-- bridge never learns the command finished. Worse for "rename": that's the
+-- only signal bridge_server.py has to migrate a folder assignment from the
+-- old id to the new one, so losing it orphans that assignment for good
+-- (the old id never reports again). A few quick retries fix this cheaply.
 local ACK_RETRY_ATTEMPTS = 3
 local ACK_RETRY_DELAY = 0.5
 
@@ -410,17 +299,12 @@ local function isSafePath(path)
     return type(path) == "string" and not path:find("%.%.")
 end
 
--- without this, a remote "delete"/"move" could brick the node outright
--- - deleting fleetos.lua or startup.lua means it won't even boot back into
--- FleetOS next restart (and, since fleetbridge itself would be gone with
--- it, there'd be no remote way to fix it either), and deleting/moving
--- config.lua loses the node's identity (id/role/startup list/bridge
--- address). Checked by basename only (not full path), since these files
--- always live at the computer's root regardless of how the path was
--- spelled. `cmd.force = true` bypasses this deliberately. Deliberately NOT
--- applied to "writefile" - see that handler's own comment for why
--- overwriting content is a normal, expected action (unlike losing the file
--- entirely) and guarding it would break routine config.lua editing.
+-- Without this, a remote "delete"/"move" could brick the node - losing
+-- fleetos.lua/startup.lua means no reboot back into FleetOS (and no remote
+-- fix either, since fleetbridge is gone with it); losing config.lua loses
+-- the node's identity. Basename-only match (these always live at root).
+-- `cmd.force = true` bypasses it. NOT applied to "writefile" - overwriting
+-- content is routine (config.lua edits), unlike losing the file outright.
 local CRITICAL_BASENAMES = { ["fleetos.lua"] = true, ["startup.lua"] = true, ["config.lua"] = true }
 
 local function isCriticalPath(path)
@@ -856,16 +740,12 @@ local function poll()
     return commands, nil
 end
 
--- Powers the dashboard's map/position column. gps.locate() needs a GPS host
--- constellation (4+ wireless-modem computers running the stock gps host
--- program) to resolve anything - most fleets won't have one, and that's
--- fine, `pos` just stays nil and the dashboard shows "unknown". Only
--- refreshed every POS_REFRESH_EVERY cycles (not every poll) with a SHORT
--- timeout, for two reasons: gps.locate() blocks on a rednet round-trip
--- (same event loop everything else here shares), and if no GPS host exists
--- at all it would otherwise block for its full timeout on EVERY single
--- ~1s poll cycle forever. The last successful fix is cached and resent
--- every report even on cycles that didn't re-check.
+-- Powers the dashboard's position column. gps.locate() needs a GPS host
+-- constellation (most fleets won't have one - `pos` just stays nil then).
+-- Refreshed every POS_REFRESH_EVERY cycles, not every poll, with a short
+-- timeout - it blocks on a rednet round-trip, and with no host at all it'd
+-- otherwise block on every single poll cycle forever. Last fix is cached
+-- and resent every report even on cycles that didn't re-check.
 local POS_REFRESH_EVERY = math.ceil(15 / POLL_INTERVAL)
 local GPS_TIMEOUT = 1 -- seconds - short on purpose, see above
 local ticksSincePos = POS_REFRESH_EVERY -- so the very first cycle tries once immediately
@@ -882,16 +762,11 @@ end
 
 -- Returns err (nil on success) - same reasoning as poll() above.
 -- Payload diet: report() used to resend apps/appVersions/pos/
--- effectiveConfig/monitor in FULL every single cycle (as often as every
--- POLL_INTERVAL_ACTIVE = 0.2s while active) even when nothing had changed,
--- and `output` resent the last 150 lines every time instead of just what's
--- new. These locals track what was last SUCCESSFULLY delivered (updated
--- only after httpPost actually succeeds, never on a failed/lost attempt -
--- otherwise a single dropped report would permanently omit data the
--- bridge never actually received). A field is included in the outgoing
--- body only when it differs from its "last sent" value; the bridge's
--- merge logic (see windows/bridge_server.py's /report handler) keeps
--- whatever it already had for anything omitted.
+-- effectiveConfig/monitor in full every cycle even when unchanged. These
+-- locals track what was last SUCCESSFULLY delivered (only updated after
+-- httpPost succeeds - a dropped report must not permanently omit data the
+-- bridge never got). A field is sent only when it differs from its "last
+-- sent" value; the bridge's merge logic keeps whatever it had for the rest.
 local lastOutputCursor = 0
 local lastMonitorHash = nil
 local lastAppsJSON = nil

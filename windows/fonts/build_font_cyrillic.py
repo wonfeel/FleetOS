@@ -1,28 +1,14 @@
-# Builds windows/fonts/cc-terminal.{ttf,woff} - the real CC:Tweaked
-# terminal font, extracted pixel-for-pixel from the game's own bitmap
-# glyph atlas (termFont.png, 16x16 grid of 6x9px glyphs - see
-# reference/ComputerCraft-1.79/.../FixedWidthFontRenderer.java), with
-# Cyrillic added on top (not present in the original game font -
-# CC:Tweaked/ComputerCraft has never supported Cyrillic). Every lit pixel
-# becomes a unit-square outline via fontTools - a faithful vector
-# reproduction, not an approximation/lookalike font. Two sources per
-# Cyrillic letter:
-#  - "reuse": visually-identical Cyrillic letters just borrow the existing
-#    Latin glyph's exact pixel data straight from the real atlas (А=A, а=a,
-#    etc - same shape, different codepoint) - not an approximation, the
-#    real game glyph IS that shape already.
-#  - "custom": hand-drawn 6x9 bitmaps in the same pixel style/weight/
-#    baseline as the real font (verified against real 'A'/'a'/'g'/'y'
-#    baseline placement measured directly from the atlas: uppercase fills
-#    rows 0-6, lowercase x-height fills rows 2-6, descenders extend into
-#    row 7).
+# Builds cc-terminal.{ttf,woff} from the real CC:Tweaked glyph atlas
+# (termFont.png, 16x16 grid of 6x9px glyphs), with Cyrillic bolted on since
+# the game font never had it. Two sources per Cyrillic letter: "reuse" just
+# borrows the exact pixel data of a visually-identical Latin glyph (А=A,
+# а=a - real shape, different codepoint), "custom" is hand-drawn 6x9
+# bitmaps matched to the real font's baseline (checked against 'A'/'a'/
+# 'g'/'y' directly from the atlas).
 #
-# Needs `reference/` (the CC:Tweaked mod source - gitignored, not part of
-# this repo; see docs/README.html for where to get it) and numpy/Pillow/
-# fontTools (`pip install numpy pillow fonttools`). Run from anywhere:
-#   py windows/fonts/build_font_cyrillic.py
-# then re-embed the resulting woff as base64 in dashboard.html's
-# @font-face.
+# Needs reference/ (gitignored CC:Tweaked source, see docs/README.html) and
+# `pip install numpy pillow fonttools`. Run, then re-embed the woff as
+# base64 in dashboard.html's @font-face - not automated, copy-paste it by hand.
 import os
 import numpy as np
 from PIL import Image

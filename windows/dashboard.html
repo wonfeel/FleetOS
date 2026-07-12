@@ -288,7 +288,7 @@
   <div class="topbar">
     <div>
       <h1><span class="prompt">&gt;</span> <span data-i18n="page_h1">FleetOS Remote Terminal</span></h1>
-      <div class="sub">bridge_server.py &middot; <span id="pingPill" class="pill stale">no report yet</span></div>
+      <div class="sub">bridge_server.py | <span id="pingPill" class="pill stale">no report yet</span></div>
     </div>
     <div class="lang-switch">
       <a id="guideLink" href="hardening_guide.html#recent-fixes" target="_blank" rel="noopener" class="secondary" style="text-decoration:none;display:inline-flex;align-items:center;padding:0 10px" data-i18n="link_guide">Guide</a>
@@ -992,7 +992,7 @@ let LANG = localStorage.getItem('fleetLang') || (navigator.language && navigator
 
 // t('key') looks up the current language, falling back to English, then the
 // key itself - so a missing translation degrades to something visible
-// instead of throwing. tf() also fills in {placeholders}.
+// instead of throwing. tf() additionally fills in {placeholders}.
 function t(key) {
   const dict = I18N[LANG] || I18N.en;
   return (key in dict) ? dict[key] : ((key in I18N.en) ? I18N.en[key] : key);
