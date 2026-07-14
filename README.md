@@ -1,13 +1,13 @@
 # FleetOS
 
-![CI](https://github.com/wonfeel/fleetos-dashboard/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/wonfeel/FleetOS/actions/workflows/ci.yml/badge.svg)
 ![Python](https://img.shields.io/badge/Python-3.12-blue?style=flat)
 ![Lua](https://img.shields.io/badge/Lua-5.1%20%28CC%3ATweaked%29-2C2D72?style=flat)
 ![Docker](https://img.shields.io/badge/Docker-optional-2496ED?style=flat)
 ![Platform](https://img.shields.io/badge/platform-any%20(bridge)%20%2F%20Windows%20(sim)-0078d7?style=flat)
 ![License](https://img.shields.io/badge/license-MIT-green?style=flat)
 
-[Русский](README.ru.md) | [Gateway cluster architecture](https://wonfeel.github.io/fleetos-dashboard/docs/ARCHITECTURE_GATEWAY_CLUSTER.html) | [Hardening guide](https://wonfeel.github.io/fleetos-dashboard/docs/hardening_guide.html)
+[Русский](README.ru.md) | [Gateway cluster architecture](https://wonfeel.github.io/FleetOS/docs/ARCHITECTURE_GATEWAY_CLUSTER.html) | [Hardening guide](https://wonfeel.github.io/FleetOS/docs/hardening_guide.html)
 
 A mini-OS for CC:Tweaked (ComputerCraft) computers, plus a Windows-side bridge and web dashboard
 to control an entire fleet of them remotely, released under the [MIT license](LICENSE). Every
@@ -47,7 +47,7 @@ at one of them at a time. A node registers itself just by polling once.
   URL, API key, startup app list), rename, folder organization, macros.
 
 The **gateway cluster** (`apps/common/fleetgateway.lua`, see the
-[architecture doc](https://wonfeel.github.io/fleetos-dashboard/docs/ARCHITECTURE_GATEWAY_CLUSTER.html))
+[architecture doc](https://wonfeel.github.io/FleetOS/docs/ARCHITECTURE_GATEWAY_CLUSTER.html))
 lets a handful of trusted computers relay poll/report traffic for the rest of the fleet over
 `rednet` instead of every node making its own HTTP call - signed heartbeat-based leader election,
 automatic failover.
@@ -135,9 +135,9 @@ the range's bucket width) keeps multiple open dashboard tabs from re-triggering 
    `wget http://<your-pc-ip>:8787/install.lua install` then `install`.
 4. The new computer shows up in the dashboard within a few seconds.
 
-See [`docs/quickstart.html`](https://wonfeel.github.io/fleetos-dashboard/docs/quickstart.html)
+See [`docs/quickstart.html`](https://wonfeel.github.io/FleetOS/docs/quickstart.html)
 (Russian) for the same steps with more detail, or
-[`docs/fleetos_guide.html`](https://wonfeel.github.io/fleetos-dashboard/docs/fleetos_guide.html)
+[`docs/fleetos_guide.html`](https://wonfeel.github.io/FleetOS/docs/fleetos_guide.html)
 for the full picture (bridge setup, the
 optional API key, troubleshooting, everything).
 
@@ -147,7 +147,7 @@ optional API key, troubleshooting, everything).
   [`game/apps/README.md`](game/apps/README.md) to write your own app.
 - [`windows/`](windows/) - the bridge server, the dashboard, and the Windows-only local simulation.
 - [`test/`](test/) - Lua unit tests, runnable without Minecraft (`cd game && lua ../test/<name>.lua`).
-- [`docs/`](docs/) - every human-facing guide; see [`docs/README.html`](https://wonfeel.github.io/fleetos-dashboard/docs/README.html) for the index.
+- [`docs/`](docs/) - every human-facing guide; see [`docs/README.html`](https://wonfeel.github.io/FleetOS/docs/README.html) for the index.
 - [`.github/workflows/ci.yml`](.github/workflows/ci.yml) - Python (Linux + Windows), Lua, and the
   real end-to-end Windows-integration suite, on every push.
 
