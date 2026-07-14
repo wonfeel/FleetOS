@@ -51,18 +51,52 @@
     <h2>Proposed shape</h2>
     <p><b style="color:var(--amber)">Gateway nodes</b> (2-5 trusted computers) run a new <code>fleetgateway.lua</code> instead of <code>fleetbridge.lua</code>. Exactly ONE gateway is "leader" at a time - only the leader polls the real <code>bridge_server.py</code> over HTTP; every other gateway sits idle, watching for the leader to disappear.</p>
     <p><b style="color:var(--amber)">Regular nodes</b> keep running (a modified) <code>fleetbridge.lua</code>, but instead of HTTP to <code>bridge_server.py</code> directly, they poll/report to whichever gateway is currently leader, over rednet (no HTTP dependency for regular nodes at all - only gateways need one).</p>
-    <pre><code>dashboard.html  &lt;--HTTP--&gt;  bridge_server.py  &lt;--HTTP--&gt;  [leader gateway]
-                                                                 ^
-                                                        rednet   | rednet
-                                                    (leader election +
-                                                     heartbeats between
-                                                     gateways)
-                                                                 v
-                                                   [other gateways, idle]
-                                                                 ^
-                                                          rednet | (poll/report)
-                                                                 v
-                                                        [regular nodes]</code></pre>
+    <svg viewBox="0 0 860 400" role="img" aria-label="Gateway cluster topology diagram" style="width:100%;height:auto;max-width:860px;display:block;margin:14px auto;">
+      <defs>
+        <marker id="ah-amber" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#ffb300"/>
+        </marker>
+        <marker id="ah-green" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#5fd97a"/>
+        </marker>
+      </defs>
+
+      <!-- HTTP row -->
+      <line x1="130" y1="40" x2="272" y2="40" stroke="#ffb300" stroke-width="2" marker-end="url(#ah-amber)" marker-start="url(#ah-amber)"/>
+      <text x="201" y="30" fill="#ffb300" font-size="12" text-anchor="middle" font-family="monospace">HTTP</text>
+      <line x1="420" y1="40" x2="562" y2="40" stroke="#ffb300" stroke-width="2" marker-end="url(#ah-amber)" marker-start="url(#ah-amber)"/>
+      <text x="491" y="30" fill="#ffb300" font-size="12" text-anchor="middle" font-family="monospace">HTTP</text>
+
+      <rect x="10" y="14" width="120" height="52" rx="6" fill="#171c14" stroke="#2a3324"/>
+      <text x="70" y="45" fill="#d8dccb" font-size="13" text-anchor="middle" font-family="monospace">dashboard.html</text>
+
+      <rect x="272" y="14" width="148" height="52" rx="6" fill="#171c14" stroke="#2a3324"/>
+      <text x="346" y="45" fill="#d8dccb" font-size="13" text-anchor="middle" font-family="monospace">bridge_server.py</text>
+
+      <rect x="562" y="10" width="160" height="60" rx="6" fill="rgba(255,179,0,0.08)" stroke="#ffb300"/>
+      <text x="642" y="35" fill="#ffb300" font-size="13" text-anchor="middle" font-family="monospace">leader gateway</text>
+      <text x="642" y="52" fill="#8a9280" font-size="11" text-anchor="middle" font-family="monospace">(fleetgateway.lua)</text>
+
+      <!-- rednet: leader <-> other gateways -->
+      <line x1="642" y1="70" x2="642" y2="164" stroke="#5fd97a" stroke-width="2" marker-end="url(#ah-green)" marker-start="url(#ah-green)"/>
+      <rect x="672" y="88" width="160" height="60" rx="4" fill="#0c0f0d" stroke="#2a3324"/>
+      <text x="752" y="105" fill="#5fd97a" font-size="11" text-anchor="middle" font-family="monospace">rednet</text>
+      <text x="752" y="120" fill="#8a9280" font-size="10" text-anchor="middle" font-family="monospace">leader election +</text>
+      <text x="752" y="133" fill="#8a9280" font-size="10" text-anchor="middle" font-family="monospace">heartbeats</text>
+
+      <rect x="542" y="164" width="200" height="52" rx="6" fill="#171c14" stroke="#2a3324"/>
+      <text x="642" y="195" fill="#8a9280" font-size="13" text-anchor="middle" font-family="monospace">other gateways (idle)</text>
+
+      <!-- rednet: leader <-> regular nodes -->
+      <line x1="642" y1="70" x2="300" y2="290" stroke="#5fd97a" stroke-width="2" marker-end="url(#ah-green)" marker-start="url(#ah-green)"/>
+      <rect x="452" y="222" width="180" height="52" rx="4" fill="#0c0f0d" stroke="#2a3324"/>
+      <text x="542" y="243" fill="#5fd97a" font-size="11" text-anchor="middle" font-family="monospace">rednet</text>
+      <text x="542" y="258" fill="#8a9280" font-size="10" text-anchor="middle" font-family="monospace">poll / report</text>
+
+      <rect x="150" y="292" width="300" height="52" rx="6" fill="rgba(95,217,122,0.06)" stroke="#5fd97a"/>
+      <text x="300" y="316" fill="#d8dccb" font-size="13" text-anchor="middle" font-family="monospace">regular nodes</text>
+      <text x="300" y="332" fill="#8a9280" font-size="11" text-anchor="middle" font-family="monospace">(fleetbridge.lua, rednet-only)</text>
+    </svg>
     <p>If the leader gateway goes down (or loses its own HTTP path to <code>bridge_server.py</code>), the remaining gateways detect the missing heartbeat and elect a new leader within a few seconds - regular nodes don't need to know or care which gateway is leader; they just always contact "the current leader" (see "Discovery" below).</p>
     <div class="warn"><b>This does NOT remove <code>bridge_server.py</code> as a single point of failure entirely</b> - the PC-side bridge is still one process. What it DOES fix: a regular node losing its OWN HTTP path (e.g. a bad <code>computercraft-server.toml</code> rule, a temporary network blip between that one computer and the PC) no longer isolates just that node, since it was never talking to the PC directly - and it reduces <code>bridge_server.py</code>'s own HTTP load from O(all nodes) to O(number of gateways), addressing both the TPS/server-load concern and the availability concern at once. A TRUE fix for the PC-side single point of failure would need multiple <code>bridge_server.py</code> instances with their own leader election and shared/replicated state - a further, separate project on top of this one, not covered here.</div>
   </section>
