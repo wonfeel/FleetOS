@@ -171,18 +171,4 @@ cd game && for f in ../test/test_*.lua; do lua "$f" || break; done
 cd windows && python -m unittest test_bridge_server test_bridge_server_load test_integration -v
 ```
 
-## What's not done yet
-
-> [!Warning]
-> The drone control math is unit-tested but **never flown** - the redstone channel map, gyroscope
-> peripheral name, and every PID gain in `apps/drone/_drone_config.lua` are starting points that
-> need real in-game verification before this should fly anything.
-
-- Swarm/flocking control (boids-style multi-drone coordination) - deliberately scoped out until a
-  single drone's manual control + attitude hold has actually been flown and tuned in-game.
-- WebSocket migration - the bridge is poll-based (sub-second latency in practice, but not
-  push-based), which is the ceiling on how responsive drone manual control can feel.
-- Automatic HTTPS/cert provisioning - TLS is opt-in and manual today. Works fine on a Radmin LAN,
-  which is honestly the only setup I've actually tested against.
-
 MIT - see [`LICENSE`](LICENSE).
