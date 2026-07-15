@@ -164,7 +164,7 @@ windows/test_bridge_server.py (17)  bridge unit tests (state, persistence, TTLs)
 windows/test_bridge_server_load.py (5)  concurrency: 32 threads, unique ids, no lost writes
 windows/test_integration.py (1)     real lua subprocess, full poll/report/command/result cycle
 ```
-
+ 
 Run everything CI runs, locally:
 ```bash
 cd game && for f in ../test/test_*.lua; do lua "$f" || break; done
